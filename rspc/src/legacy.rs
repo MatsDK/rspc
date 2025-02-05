@@ -22,7 +22,7 @@ impl<TCtx> From<rspc_legacy::Router<TCtx>> for crate::Router<TCtx> {
     fn from(router: rspc_legacy::Router<TCtx>) -> Self {
         let mut r = crate::Router::new();
 
-        let (queries, mutations, subscriptions, mut type_map) = router.into_parts();
+        let (queries, mutations, subscriptions, type_map) = router.into_parts();
 
         let bridged_procedures = queries
             .into_iter()
@@ -61,7 +61,7 @@ impl<TCtx> From<rspc_legacy::Router<TCtx>> for crate::Router<TCtx> {
             }
         }
 
-        r.types.extend(&mut type_map);
+        r.types = type_map;
         r
     }
 }

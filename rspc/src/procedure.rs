@@ -30,11 +30,11 @@ use std::{borrow::Cow, marker::PhantomData, panic::Location, sync::Arc};
 
 use futures_util::{FutureExt, TryStreamExt};
 
-use specta::datatype::DataType;
+use specta::{datatype::DataType, Generics, TypeCollection};
 
 use crate::{Error, Extension, ProcedureKind, State};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ProcedureType {
     pub(crate) kind: ProcedureKind,
     pub(crate) input: DataType,
@@ -48,8 +48,12 @@ pub(crate) struct ProcedureType {
 /// A [`Procedure`] is built from a [`ProcedureBuilder`] and holds the type information along with the logic to execute the operation.
 ///
 pub struct Procedure<TCtx, TInput, TResult> {
-    pub(crate) build:
-        Box<dyn FnOnce(Vec<Box<dyn FnOnce(&mut State, ProcedureMeta)>>) -> ErasedProcedure<TCtx>>,
+    pub(crate) build: Box<
+        dyn FnOnce(
+            Vec<Box<dyn FnOnce(&mut State, ProcedureMeta)>>,
+            &mut TypeCollection,
+        ) -> ErasedProcedure<TCtx>,
+    >,
     pub(crate) phantom: PhantomData<(TInput, TResult)>,
 }
 
@@ -69,7 +73,7 @@ impl<TCtx, TInput, TResult> Procedure<TCtx, TInput, TResult> {
     {
         let location = Location::caller().clone();
         ProcedureBuilder {
-            build: Box::new(move |kind, setup, handler| {
+            build: Box::new(move |kind, setup, handler, types| {
                 ErasedProcedure {
                     setup: setup
                         .into_iter()
@@ -89,9 +93,9 @@ impl<TCtx, TInput, TResult> Procedure<TCtx, TInput, TResult> {
                         .collect::<Vec<_>>(),
                     ty: ProcedureType {
                         kind,
-                        input: DataType::Any,  // I::data_type(type_map),
-                        output: DataType::Any, // R::data_type(type_map),
-                        error: DataType::Any,  // TODO
+                        input: TInput::data_type(types),
+                        output: TResult::data_type(types),
+                        error: TError::inline(types, Generics::Definition),
                         location,
                     },
                     inner: Box::new(move |state| {
@@ -124,11 +128,11 @@ impl<TCtx, TInput, TResult> Procedure<TCtx, TInput, TResult> {
         TCtx: 'static,
     {
         Procedure {
-            build: Box::new(move |mut setups| {
+            build: Box::new(move |mut setups, types| {
                 if let Some(setup) = mw.setup {
                     setups.push(setup);
                 }
-                (self.build)(setups)
+                (self.build)(setups, types)
             }),
             phantom: PhantomData,
         }
@@ -188,8 +192,8 @@ impl<TCtx, TInput, TResult> Procedure<TCtx, TInput, TResult> {
     // }
 }
 
-impl<TCtx, TInput, TResult> Into<ErasedProcedure<TCtx>> for Procedure<TCtx, TInput, TResult> {
-    fn into(self) -> ErasedProcedure<TCtx> {
-        (self.build)(Default::default())
+impl<TCtx, TInput, TResult> Procedure<TCtx, TInput, TResult> {
+    pub fn into_erased(self, types: &mut TypeCollection) -> ErasedProcedure<TCtx> {
+        (self.build)(Default::default(), types)
     }
 }

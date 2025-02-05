@@ -40,10 +40,10 @@ impl<TCtx> Router<TCtx> {
     }
 
     #[track_caller]
-    pub fn procedure(
+    pub fn procedure<TInput, TResult>(
         mut self,
         key: impl Into<Cow<'static, str>>,
-        procedure: impl Into<ErasedProcedure<TCtx>>,
+        procedure: Procedure<TCtx, TInput, TResult>,
     ) -> Self {
         let key = key.into();
 
@@ -54,7 +54,7 @@ impl<TCtx> Router<TCtx> {
                 duplicate: Location::caller().clone(),
             });
         } else {
-            let mut procedure = procedure.into();
+            let mut procedure = procedure.into_erased(&mut self.types);
             self.setup.extend(procedure.setup.drain(..));
             self.procedures.insert(vec![key], procedure);
         }
@@ -85,6 +85,7 @@ impl<TCtx> Router<TCtx> {
                 path.extend(e.path);
                 DuplicateProcedureKeyError { path, ..e }
             }));
+            self.types.extend(other.types);
             self.procedures
                 .extend(other.procedures.into_iter().map(|(k, v)| {
                     let mut key = vec![prefix.clone()];
@@ -110,6 +111,7 @@ impl<TCtx> Router<TCtx> {
 
         self.setup.append(&mut other.setup);
         self.procedures.extend(other.procedures.into_iter());
+        self.types.extend(other.types);
         self.errors.extend(other.errors);
 
         self

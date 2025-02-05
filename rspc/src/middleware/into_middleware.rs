@@ -44,12 +44,12 @@ where
     ) -> ProcedureBuilder<TError, TRootCtx, Self::TNextCtx, TBaseInput, Self::I, TBaseResult, Self::R>
     {
         ProcedureBuilder {
-            build: Box::new(|ty, mut setups, handler| {
+            build: Box::new(|ty, mut setups, handler, types| {
                 if let Some(setup) = self.setup {
                     setups.push(setup);
                 }
 
-                (this.build)(ty, setups, (self.inner)(handler))
+                (this.build)(ty, setups, (self.inner)(handler), types)
             }),
             phantom: PhantomData,
         }
@@ -81,12 +81,12 @@ where
     ) -> ProcedureBuilder<TError, TRootCtx, Self::TNextCtx, TBaseInput, Self::I, TBaseResult, Self::R>
     {
         ProcedureBuilder {
-            build: Box::new(|ty, mut setups, handler| {
+            build: Box::new(|ty, mut setups, handler, types| {
                 if let Some(setup) = self.setup {
                     setups.push(setup);
                 }
 
-                (this.build)(ty, setups, handler)
+                (this.build)(ty, setups, handler, types)
             }),
             phantom: PhantomData,
         }

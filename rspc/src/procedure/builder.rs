@@ -8,6 +8,7 @@ use crate::{
 use super::{ErasedProcedure, ProcedureKind, ProcedureMeta};
 
 use rspc_procedure::State;
+use specta::TypeCollection;
 
 // TODO: Document the generics like `Middleware`. What order should they be in?
 pub struct ProcedureBuilder<TError, TBaseCtx, TCtx, TBaseInput, TInput, TBaseResult, TResult> {
@@ -16,6 +17,7 @@ pub struct ProcedureBuilder<TError, TBaseCtx, TCtx, TBaseInput, TInput, TBaseRes
             ProcedureKind,
             Vec<Box<dyn FnOnce(&mut State, ProcedureMeta) + 'static>>,
             MiddlewareHandler<TError, TCtx, TInput, TResult>,
+            &mut TypeCollection,
         ) -> ErasedProcedure<TBaseCtx>,
     >,
     pub(crate) phantom: PhantomData<(TBaseInput, TBaseResult)>,
@@ -56,9 +58,9 @@ where
 
     pub fn setup(self, func: impl FnOnce(&mut State, ProcedureMeta) + 'static) -> Self {
         Self {
-            build: Box::new(|ty, mut setups, handler| {
+            build: Box::new(|ty, mut setups, handler, types| {
                 setups.push(Box::new(func));
-                (self.build)(ty, setups, handler)
+                (self.build)(ty, setups, handler, types)
             }),
             phantom: PhantomData,
         }
@@ -69,11 +71,12 @@ where
         handler: impl Fn(TCtx, TInput) -> F + Send + Sync + 'static,
     ) -> Procedure<TRootCtx, TBaseInput, TBaseResult> {
         Procedure {
-            build: Box::new(move |setups| {
+            build: Box::new(move |setups, types| {
                 (self.build)(
                     ProcedureKind::Query,
                     setups,
                     Arc::new(move |ctx, input, _| Box::pin(handler(ctx, input))),
+                    types,
                 )
             }),
             phantom: PhantomData,
@@ -85,11 +88,12 @@ where
         handler: impl Fn(TCtx, TInput) -> F + Send + Sync + 'static,
     ) -> Procedure<TRootCtx, TBaseInput, TBaseResult> {
         Procedure {
-            build: Box::new(move |setups| {
+            build: Box::new(move |setups, types| {
                 (self.build)(
                     ProcedureKind::Mutation,
                     setups,
                     Arc::new(move |ctx, input, _| Box::pin(handler(ctx, input))),
+                    types,
                 )
             }),
             phantom: PhantomData,
