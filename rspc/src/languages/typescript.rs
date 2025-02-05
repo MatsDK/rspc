@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::BTreeMap, iter::once, path::Path};
 
 use serde_json::json;
 use specta::{datatype::DataType, NamedType, Type};
-use specta_typescript::{datatype, export_named_datatype, ExportError};
+use specta_typescript::{datatype, export_named_datatype, ExportError, FormatterFn};
 
 use crate::{
     procedure::ProcedureType, types::TypesOrType, util::literal_object, ProcedureKind, Types,
@@ -28,6 +28,13 @@ impl Typescript {
     pub fn header(self, header: impl Into<Cow<'static, str>>) -> Self {
         Self {
             inner: self.inner.header(header),
+            ..self
+        }
+    }
+
+    pub fn formatter(self, formatter: FormatterFn) -> Self {
+        Self {
+            inner: self.inner.formatter(formatter),
             ..self
         }
     }
