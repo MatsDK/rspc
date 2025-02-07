@@ -62,7 +62,7 @@ where
     type T = T;
 
     fn data_type(types: &mut TypeCollection) -> DataType {
-        T::inline(types, Generics::Definition)
+        T::reference(types, &[]).inner
     }
 
     fn into_stream(self) -> impl Stream<Item = Result<Self::T, ProcedureError>> + Send + 'static {

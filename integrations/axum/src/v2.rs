@@ -213,15 +213,18 @@ async fn handle_websocket<TCtx, TCtxFn, TCtxFnMarker, TState>(
     TCtxFn: TCtxFunc<TCtx, TState, TCtxFnMarker>,
     TState: Send + Sync,
 {
+    use std::sync::Arc;
+
     use axum::extract::ws::Message;
     use futures::StreamExt;
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, Mutex};
+    let procedures = Arc::new(procedures);
 
     // #[cfg(feature = "tracing")]
     // tracing::debug!("Accepting websocket connection");
 
-    let mut subscriptions = HashMap::new();
-    let (mut tx, mut rx) = mpsc::channel::<jsonrpc::Response>(100);
+    let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = mpsc::unbounded_channel::<jsonrpc::Response>();
 
     loop {
         tokio::select! {
@@ -255,13 +258,13 @@ async fn handle_websocket<TCtx, TCtxFn, TCtxFnMarker, TState>(
                                 continue;
                             }
                         };
-
                         match res.and_then(|v| match v.is_array() {
                             true => serde_json::from_value::<Vec<jsonrpc::Request>>(v),
                             false => serde_json::from_value::<jsonrpc::Request>(v).map(|v| vec![v]),
                         }) {
                             Ok(reqs) => {
                                 for request in reqs {
+                                    let subscriptions = subscriptions.clone();
                                     let ctx = match ctx_fn.exec(parts.clone(), &state).await {
                                         Ok(ctx) => {
                                             ctx
@@ -274,9 +277,12 @@ async fn handle_websocket<TCtx, TCtxFn, TCtxFnMarker, TState>(
                                             continue;
                                         }
                                     };
-
-                                    handle_json_rpc(ctx, request, &procedures, &mut Sender::Channel(&mut tx),
-                                    &mut SubscriptionMap::Ref(&mut subscriptions)).await;
+                                    let mut resp_tx = tx.clone();
+                                    let router=  procedures.clone();
+                                    tokio::spawn(async move {
+                                        handle_json_rpc(ctx, request, &router, &mut Sender::ResponseChannel(&mut resp_tx),
+                                        &mut SubscriptionMap::Mutex(subscriptions.borrow())).await;
+                                    } );
                                 }
                             },
                             Err(_err) => {
