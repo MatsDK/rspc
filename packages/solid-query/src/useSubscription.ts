@@ -10,6 +10,7 @@ export type SubscriptionResult<TOut, TError> = {
 	status: SubscriptionStatus;
 };
 
+// TODO: add reset method
 export function useSubscription<TOut, TError>(
 	options: RspcSubscriptionOptions<TOut, TError>,
 ) {

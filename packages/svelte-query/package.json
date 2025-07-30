@@ -23,6 +23,7 @@
 	"files": ["dist"],
 	"scripts": {
 		"build": "svelte-package --input ./src --output ./dist",
+		"dev": "svelte-package --input ./src --output ./dist --watch",
 		"test": "vitest"
 	},
 	"dependencies": {
