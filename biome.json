@@ -1,7 +1,7 @@
 {
 	"$schema": "https://biomejs.dev/schemas/1.7.3/schema.json",
 	"files": {
-		"include": ["packages/**"],
+		"include": ["packages/**", "examples/**"],
 		"ignore": ["node_modules", "dist"]
 	},
 	"organizeImports": {
@@ -22,9 +22,7 @@
 			}
 		}
 	},
-	"formatter": {
-		"indentStyle": "tab"
-	},
+	"formatter": {},
 	"vcs": {
 		"enabled": true,
 		"clientKind": "git",

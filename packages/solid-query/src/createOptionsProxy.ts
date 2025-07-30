@@ -161,21 +161,13 @@ export function createRSPCOptionsProxy<P extends Procedures>(
 	});
 }
 
-export type inferInput<
-	TProcedure extends
-		| QueryMethods<any>
-		| MutationMethods<any>
-		| SubscriptionMethods<any>,
-> = TProcedure["~types"]["input"];
-export type inferOutput<
-	TProcedure extends
-		| QueryMethods<any>
-		| MutationMethods<any>
-		| SubscriptionMethods<any>,
-> = TProcedure["~types"]["output"];
-export type inferError<
-	TProcedure extends
-		| QueryMethods<any>
-		| MutationMethods<any>
-		| SubscriptionMethods<any>,
-> = TProcedure["~types"]["error"];
+type AnyProcedure =
+	| QueryMethods<any>
+	| MutationMethods<any>
+	| SubscriptionMethods<any>;
+export type inferInput<TProcedure extends AnyProcedure> =
+	TProcedure["~types"]["input"];
+export type inferOutput<TProcedure extends AnyProcedure> =
+	TProcedure["~types"]["output"];
+export type inferError<TProcedure extends AnyProcedure> =
+	TProcedure["~types"]["error"];

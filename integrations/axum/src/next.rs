@@ -2,10 +2,10 @@ use crate::extractors::TCtxFunc;
 use axum::{
     Router,
     body::{Body, to_bytes},
-    extract::State,
+    extract::{State, WebSocketUpgrade},
     http::{HeaderValue, Method, Response, StatusCode, request::Parts},
     response::{IntoResponse, Sse, sse::Event},
-    routing::{MethodFilter, on, post},
+    routing::{MethodFilter, any, on, post},
 };
 use futures::{
     FutureExt, SinkExt, StreamExt, TryStreamExt, channel::oneshot, pin_mut,
@@ -80,6 +80,27 @@ where
         let procedures = Arc::new(self.procedures);
 
         Router::<S>::new()
+            .route(
+                "/ws",
+                on(MethodFilter::GET, {
+                    #[cfg(feature = "ws")]
+                    {
+                        let procedures = procedures.clone();
+                        let ctx_fn = self.ctx_fn.clone();
+                        async move |state: State<S>, ws: WebSocketUpgrade| {
+                            ws.on_upgrade(|socket| {
+                                handle_websocket(ctx_fn, socket, procedures, state.0)
+                            })
+                        }
+                    }
+                    #[cfg(not(feature = "ws"))]
+                    return Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .header("Content-Type", "application/json")
+                        .body(rspc_err_body!(format!("WebSocket feature not enabled")))
+                        .unwrap();
+                }),
+            )
             .route(
                 "/{id}",
                 on(MethodFilter::GET.or(MethodFilter::POST), {
@@ -509,6 +530,22 @@ async fn next(stream: &mut ProcedureStream) -> Option<Result<serde_json::Value, 
                 .expect("Error serialzing value")) // This panicking is bad but this is the old exectuor
         })
     })
+}
+
+#[cfg(feature = "ws")]
+async fn handle_websocket<TCtx, TCtxFn, TCtxFnMarker, TState>(
+    ctx_fn: TCtxFn,
+    mut socket: axum::extract::ws::WebSocket,
+    // req_parts: Parts,
+    procedures: Arc<Procedures<TCtx>>,
+    state: TState,
+) where
+    TCtx: Send + Sync + 'static,
+    TCtxFn: TCtxFunc<TCtx, TState, TCtxFnMarker>,
+    TState: Send + Sync + 'static,
+{
+    println!("upgraded to websocket");
+    println!("Procedures: {procedures:?}");
 }
 
 #[cfg(test)]
