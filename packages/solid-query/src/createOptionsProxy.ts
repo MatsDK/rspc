@@ -1,5 +1,6 @@
-import type { VoidIfInputNull, SubscriptionObserver } from "@rspc/client/next";
 import {
+	type VoidIfInputNull,
+	type SubscriptionObserver,
 	type Client,
 	type Procedure,
 	type Procedures,

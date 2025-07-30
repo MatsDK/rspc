@@ -61,12 +61,16 @@ export const fetchExecute = (
 		return observable((subscriber) => {
 			promise
 				.then(async (r) => {
+					if (!r.ok) {
+						subscriber.error(await r.json());
+					}
 					if (r.status === 200) {
 						subscriber.next({ type: "data", value: await r.json() });
 						subscriber.complete();
 					}
 				})
 				.catch((e) => {
+					console.log("erorr cautch in fetchExecute", e);
 					subscriber.error(e.toString());
 				});
 		});
@@ -109,16 +113,19 @@ export const fetchExecute = (
 						const { done, value } = await reader.read();
 						if (done) break;
 
-						const line = decoder.decode(value);
+						const rawLines = decoder.decode(value);
+						rawLines.split("\n").forEach((line) => {
+							if (line === "") return; // Stream finished
 
-						const regex = /(\d+):(\[.*\])\s*$/;
-						const match = line.match(regex);
-						if (!match) throw new Error("invalid stream content!");
+							const regex = /(\d+):(\[.*\])\s*$/;
+							const match = line.match(regex);
+							if (!match) throw new Error("invalid stream content!");
 
-						const index = Number.parseInt(match[1]);
-						const [status, data] = JSON.parse(match[2]);
+							const index = Number.parseInt(match[1]);
+							const [status, data] = JSON.parse(match[2]);
 
-						batchLoader.callbacks[index]?.([status, data]);
+							batchLoader!.callbacks[index]?.([status, data]);
+						});
 					}
 				}
 			}, 1);
