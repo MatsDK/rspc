@@ -1,119 +1,224 @@
-use std::{borrow::Borrow, collections::HashMap};
-
+use crate::extractors::TCtxFunc;
 use axum::{
-    RequestExt, Router,
+    Router,
     body::{Body, to_bytes},
-    extract::{Request, State},
-    http::{Method, Response, StatusCode, request::Parts},
-    response::IntoResponse,
-    routing::{MethodFilter, on},
+    extract::State,
+    http::{HeaderValue, Method, Response, StatusCode, header, request::Parts},
+    response::{IntoResponse, Sse, sse::Event},
+    routing::{MethodFilter, on, post},
 };
-use rspc_procedure::{Procedure, Procedures};
-use serde_json::Value;
-
-use crate::{
-    extractors::TCtxFunc,
-    jsonrpc::{self, ProcedureKind, RequestId},
-    jsonrpc_exec::{Sender, SubscriptionMap, handle_json_rpc},
+use futures::{
+    FutureExt, SinkExt, StreamExt, TryStreamExt, channel::oneshot, pin_mut,
+    stream::FuturesUnordered,
 };
+use rspc_procedure::{Procedure, ProcedureError, ProcedureStream, Procedures, ResolverError};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::{
+    borrow::{Borrow, Cow},
+    cell::RefCell,
+    convert::Infallible,
+    marker::PhantomData,
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
+use streamunordered::{StreamUnordered, StreamYield};
 
-pub fn endpoint<TCtx, TCtxFnMarker, TCtxFn, S>(
-    procedures: impl Borrow<Procedures<TCtx>>,
+thread_local! {
+    static FLUSHED: RefCell<Option<oneshot::Sender<()>>> = RefCell::new(None);
+}
+
+pub fn flush() {
+    FLUSHED.take().map(|c| c.send(()));
+}
+
+macro_rules! rspc_err_json {
+	($json:expr) => {
+		json!({ "~rspc": true, "message": $json })
+	}
+}
+
+macro_rules! rspc_err_body {
+    ($json:expr) => {
+        Body::from(
+            serde_json::to_vec(&rspc_err_json!($json))
+                .expect("converting known json should never fail"),
+        )
+    };
+}
+
+/// Serializes via [`ProcedureError`]'s own impl, so the envelope matches the one the core emits.
+fn procedure_err_body(err: &ProcedureError) -> Body {
+    Body::from(serde_json::to_vec(err).expect("converting known json should never fail"))
+}
+
+pub struct Endpoint<TCtx, TCtxFn, S> {
+    procedures: Procedures<TCtx>,
     ctx_fn: TCtxFn,
-) -> Router<S>
+    manual_stream_flushing: bool,
+    phantom: PhantomData<S>,
+}
+
+impl<TCtx, TCtxFn, TCtxFnMarker, S> Endpoint<TCtx, TCtxFn, (TCtxFnMarker, S)>
 where
     S: Clone + Send + Sync + 'static,
     TCtx: Send + Sync + 'static,
     TCtxFnMarker: Send + Sync + 'static,
     TCtxFn: TCtxFunc<TCtx, S, TCtxFnMarker>,
 {
-    let procedures = procedures.borrow().clone();
+    pub fn new(procedures: impl Borrow<Procedures<TCtx>>, ctx_fn: TCtxFn) -> Self {
+        Self {
+            procedures: procedures.borrow().clone(),
+            ctx_fn,
+            manual_stream_flushing: false,
+            phantom: PhantomData,
+        }
+    }
 
-    Router::<S>::new().route(
-        "/:id",
-        on(
-            MethodFilter::GET.or(MethodFilter::POST),
-            move |state: State<S>, req: axum::extract::Request<Body>| {
-                let procedures = procedures.clone();
+    pub fn manual_stream_flushing(mut self) -> Self {
+        self.manual_stream_flushing = true;
+        self
+    }
 
-                async move {
-                    match (req.method(), &req.uri().path()[1..]) {
-                        (&Method::GET, "ws") => {
-                            #[cfg(feature = "ws")]
-                            {
-                                let mut req = req;
-                                return req
-                                    .extract_parts::<axum::extract::ws::WebSocketUpgrade>()
-                                    .await
-                                    .unwrap() // TODO: error handling
-                                    .on_upgrade(|socket| {
-                                        handle_websocket(
-                                            ctx_fn,
-                                            socket,
-                                            req.into_parts().0,
-                                            procedures,
-                                            state.0,
-                                        )
-                                    })
-                                    .into_response();
+    pub fn build(self) -> Router<S> {
+        let procedures = Arc::new(self.procedures);
+
+        Router::<S>::new()
+            .route(
+                "/{id}",
+                on(MethodFilter::GET.or(MethodFilter::POST), {
+                    let procedures = procedures.clone();
+                    let ctx_fn = self.ctx_fn.clone();
+
+                    move |state: State<S>, req: axum::extract::Request<Body>| {
+                        let procedures = procedures.clone();
+
+                        async move {
+                            let (parts, body) = req.into_parts();
+
+                            let procedure_name = parts.uri.path()[1..].to_string();
+
+                            let Some(procedure) =
+                                procedures.get(&Cow::Borrowed(procedure_name.as_str()))
+                            else {
+                                return Response::builder()
+                                    .status(StatusCode::NOT_FOUND)
+                                    .header("Content-Type", "application/json")
+                                    .body(procedure_err_body(&ProcedureError::NotFound))
+                                    .unwrap();
+                            };
+
+                            match parts.method {
+                                Method::GET => handle_procedure(
+                                    ctx_fn,
+                                    parts
+                                        .uri
+                                        .query()
+                                        .map(|query| form_urlencoded::parse(query.as_bytes()))
+                                        .and_then(|mut params| {
+                                            params.find(|e| e.0 == "input").map(|e| e.1)
+                                        })
+                                        .map(|v| serde_json::from_str(&v))
+                                        .unwrap_or(Ok(None as Option<Value>)),
+                                    parts,
+                                    &procedure,
+                                    state.0,
+                                )
+                                .await
+                                .into_response(),
+                                Method::POST => handle_procedure(
+                                    ctx_fn,
+                                    {
+                                        let body = to_bytes(body, usize::MAX).await.unwrap(); // TODO: error handling
+                                        (!body.is_empty())
+                                            .then(|| {
+                                                serde_json::from_slice(body.to_vec().as_slice())
+                                            })
+                                            .unwrap_or(Ok(None))
+                                    },
+                                    parts,
+                                    &procedure,
+                                    state.0,
+                                )
+                                .await
+                                .into_response(),
+                                _ => Response::builder()
+                                    .status(StatusCode::METHOD_NOT_ALLOWED)
+                                    .header("Content-Type", "application/json")
+                                    .body(rspc_err_body!("only GET or POST methods are allowed"))
+                                    .unwrap(),
                             }
-
-                            #[cfg(not(feature = "ws"))]
-                            Response::builder()
-                                .status(StatusCode::NOT_FOUND)
-                                .body(Body::from("[]")) // TODO: Better error message which frontend is actually setup to handle.
-                                .unwrap()
                         }
-                        (&Method::GET, _) => {
-                            handle_http(ctx_fn, ProcedureKind::Query, req, &procedures, state.0)
-                                .await
-                                .into_response()
-                        }
-                        (&Method::POST, _) => {
-                            handle_http(ctx_fn, ProcedureKind::Mutation, req, &procedures, state.0)
-                                .await
-                                .into_response()
-                        }
-                        _ => unreachable!(),
                     }
-                }
-            },
-        ),
-    )
+                }),
+            )
+            .route("/", {
+                post(move |state: State<S>, req: axum::extract::Request<Body>| {
+                    let procedures = procedures.clone();
+
+                    async move {
+                        let (parts, body) = req.into_parts();
+                        #[derive(Deserialize)]
+                        struct BatchInput(Vec<(String, Value)>);
+
+                        let Ok(input) = ({
+                            let body = to_bytes(body, usize::MAX).await.unwrap(); // TODO: error handling
+                            serde_json::from_slice::<BatchInput>(body.to_vec().as_slice())
+                        }) else {
+                            return Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .header("Content-Type", "application/json")
+                                .body(rspc_err_body!("invalid batch body"))
+                                .unwrap();
+                        };
+
+                        let input = input
+                            .0
+                            .into_iter()
+                            .map(|(procedure_name, input)| {
+                                let Some(procedure) = procedures.get(procedure_name.as_str())
+                                else {
+                                    return Err(Response::builder()
+                                        .status(StatusCode::NOT_FOUND)
+                                        .header("Content-Type", "application/json")
+                                        .body(procedure_err_body(&ProcedureError::NotFound))
+                                        .unwrap());
+                                };
+
+                                Ok((procedure, Some(input)))
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+
+                        handle_batch(
+                            self.ctx_fn,
+                            match input {
+                                Ok(v) => v,
+                                Err(e) => return e,
+                            },
+                            parts,
+                            state.0,
+                            self.manual_stream_flushing,
+                        )
+                        .await
+                    }
+                })
+            })
+    }
 }
 
-async fn handle_http<TCtx, TCtxFn, TCtxFnMarker, TState>(
+async fn handle_procedure<TCtx, TCtxFn, TCtxFnMarker, TState>(
     ctx_fn: TCtxFn,
-    kind: ProcedureKind,
-    req: Request,
-    procedures: &Procedures<TCtx>,
+    input: Result<Option<Value>, serde_json::Error>,
+    req_parts: Parts,
+    procedure: &Procedure<TCtx>,
     state: TState,
-) -> impl IntoResponse
+) -> Response<Body>
 where
     TCtx: Send + Sync + 'static,
     TCtxFn: TCtxFunc<TCtx, TState, TCtxFnMarker>,
     TState: Send + Sync + 'static,
 {
-    let procedure_name = req.uri().path()[1..].to_string(); // Has to be allocated because `TCtxFn` takes ownership of `req`
-    let (parts, body) = req.into_parts();
-    let input = match parts.method {
-        Method::GET => parts
-            .uri
-            .query()
-            .map(|query| form_urlencoded::parse(query.as_bytes()))
-            .and_then(|mut params| params.find(|e| e.0 == "input").map(|e| e.1))
-            .map(|v| serde_json::from_str(&v))
-            .unwrap_or(Ok(None as Option<Value>)),
-        Method::POST => {
-            // TODO: Limit body size?
-            let body = to_bytes(body, usize::MAX).await.unwrap(); // TODO: error handling
-            (!body.is_empty())
-                .then(|| serde_json::from_slice(body.to_vec().as_slice()))
-                .unwrap_or(Ok(None))
-        }
-        _ => unreachable!(),
-    };
-
     let input = match input {
         Ok(input) => input,
         Err(_err) => {
@@ -121,9 +226,9 @@ where
             // tracing::error!("Error passing parameters to operation '{procedure_name}': {_err}");
 
             return Response::builder()
-                .status(StatusCode::NOT_FOUND)
+                .status(StatusCode::BAD_REQUEST)
                 .header("Content-Type", "application/json")
-                .body(Body::from(b"[]".as_slice()))
+                .body(rspc_err_body!("invalid input"))
                 .unwrap();
         }
     };
@@ -131,9 +236,15 @@ where
     // #[cfg(feature = "tracing")]
     // tracing::debug!("Executing operation '{procedure_name}' with params {input:?}");
 
-    let mut resp = Sender::Response(None);
+    let is_event_stream = req_parts
+        .headers
+        .get("Accept")
+        .clone()
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == "text/event-stream")
+        .unwrap_or_default();
 
-    let ctx = match ctx_fn.exec(parts, &state).await {
+    let ctx = match ctx_fn.exec(req_parts, &state).await {
         Ok(ctx) => ctx,
         Err(_err) => {
             // #[cfg(feature = "tracing")]
@@ -142,171 +253,519 @@ where
             return Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .header("Content-Type", "application/json")
-                .body(Body::from(b"[]".as_slice()))
+                .body(rspc_err_body!("failed to execute context function"))
                 .unwrap();
         }
     };
 
-    handle_json_rpc(
-        ctx,
-        jsonrpc::Request {
-            // jsonrpc: None,
-            id: RequestId::Null,
-            inner: match kind {
-                ProcedureKind::Query => jsonrpc::RequestInner::Query {
-                    path: procedure_name.to_string(), // TODO: Lifetime instead of allocate?
-                    input,
+    let mut stream = procedure.exec_with_deserializer(ctx, input.unwrap_or(Value::Null));
+
+    if is_event_stream {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        enum SSEEvent {
+            Item(Value),
+            Error { status: u16, data: Value },
+        }
+
+        Sse::new(futures::stream::unfold(Some(stream), async |stream| {
+            let mut stream = stream?;
+
+            let Some(v) = next(&mut stream).await else {
+                return Some((Ok(Event::default().data("stopped")), None));
+            };
+
+            let data = v.map_or_else(
+                |e| match e {
+                    NextError::Procedure(code, message) => SSEEvent::Error {
+                        status: code.as_u16(),
+                        data: rspc_err_json!(message),
+                    },
+                    NextError::Resolver(data) => SSEEvent::Error {
+                        status: 500,
+                        data: json!(data.value()),
+                    },
                 },
-                ProcedureKind::Mutation => jsonrpc::RequestInner::Mutation {
-                    path: procedure_name.to_string(), // TODO: Lifetime instead of allocate?
-                    input,
-                },
-                ProcedureKind::Subscription => {
-                    // #[cfg(feature = "tracing")]
-                    // tracing::error!("Attempted to execute a subscription operation with HTTP");
+                SSEEvent::Item,
+            );
 
-                    return Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header("Content-Type", "application/json")
-                        .body(Body::from(b"[]".as_slice()))
-                        .unwrap();
-                }
-            },
-        },
-        procedures,
-        &mut resp,
-        &mut SubscriptionMap::None,
-    )
-    .await;
+            let is_error = matches!(data, SSEEvent::Error { .. });
 
-    match resp {
-        Sender::Response(Some(resp)) => match serde_json::to_vec(&resp) {
-            Ok(v) => Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .body(Body::from(v))
-                .unwrap(),
-            Err(_err) => {
-                // #[cfg(feature = "tracing")]
-                // tracing::error!("Error serializing response: {}", _err);
+            Some((
+                Ok::<_, Infallible>(Event::default().json_data(data).unwrap()),
+                (!is_error).then_some(stream),
+            ))
+        }))
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keep-alive"),
+        )
+        .into_response()
+    } else {
+        let first_value = next(&mut stream).await;
 
-                Response::builder()
+        match first_value {
+            Some(value) => match value {
+                Ok(value) => Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&value).expect("failed to convert json to bytes"),
+                    ))
+                    .unwrap(),
+                Err(NextError::Procedure(status, body)) => Response::builder()
+                    .status(status)
+                    .header("Content-Type", "application/json")
+                    .body(rspc_err_body!(body))
+                    .unwrap(),
+                Err(NextError::Resolver(resolver_error)) => Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .header("Content-Type", "application/json")
-                    .body(Body::from(b"[]".as_slice()))
-                    .unwrap()
-            }
-        },
-        _ => unreachable!(),
+                    .body(Body::from(
+                        serde_json::to_vec(&json!(resolver_error.value())).unwrap(),
+                    ))
+                    .unwrap(),
+            },
+            None => Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("Content-Type", "application/json")
+                .body(rspc_err_body!("procedure didn't produce a value"))
+                .unwrap(),
+        }
     }
 }
 
-#[cfg(feature = "ws")]
-async fn handle_websocket<TCtx, TCtxFn, TCtxFnMarker, TState>(
+async fn handle_batch<TCtx, TCtxFn, TCtxFnMarker, TState>(
     ctx_fn: TCtxFn,
-    mut socket: axum::extract::ws::WebSocket,
-    parts: Parts,
-    procedures: Procedures<TCtx>,
+    inputs: Vec<(&Procedure<TCtx>, Option<Value>)>,
+    req_parts: Parts,
     state: TState,
-) where
+    manual_stream_flushing: bool,
+) -> Response<Body>
+where
     TCtx: Send + Sync + 'static,
     TCtxFn: TCtxFunc<TCtx, TState, TCtxFnMarker>,
-    TState: Send + Sync,
+    TState: Send + Sync + 'static,
 {
-    use axum::extract::ws::Message;
-    use futures::StreamExt;
-    use tokio::sync::mpsc;
+    let mut stream = StreamUnordered::new();
 
-    // #[cfg(feature = "tracing")]
-    // tracing::debug!("Accepting websocket connection");
+    let flushes = FuturesUnordered::new();
 
-    let mut subscriptions = HashMap::new();
-    let (mut tx, mut rx) = mpsc::channel::<jsonrpc::Response>(100);
+    let stream_response =
+        req_parts.headers.get("rspc-batch-mode") == Some(&HeaderValue::from_static("stream"));
 
-    loop {
-        tokio::select! {
-            biased; // Note: Order is important here
-            msg = rx.recv() => {
-                match socket.send(Message::Text(match serde_json::to_string(&msg) {
-                    Ok(v) => v.into(),
-                    Err(_err) => {
-                        // #[cfg(feature = "tracing")]
-                        // tracing::error!("Error serializing websocket message: {}", _err);
+    for (procedure, input) in inputs.into_iter() {
+        let ctx = match ctx_fn.exec(req_parts.clone(), &state).await {
+            Ok(ctx) => ctx,
+            Err(_err) => {
+                // #[cfg(feature = "tracing")]
+                // tracing::error!("Error executing context function: {}", _err);
 
-                        continue;
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .header("Content-Type", "application/json")
+                    .body(rspc_err_body!("failed to execute context function"))
+                    .unwrap();
+            }
+        };
+
+        let mut procedure_stream =
+            procedure.exec_with_deserializer(ctx, input.unwrap_or(Value::Null));
+
+        let mut flush_tx_opt = if manual_stream_flushing && stream_response {
+            let (tx, rx) = futures::channel::oneshot::channel();
+            flushes.push(rx);
+            Some(tx)
+        } else {
+            None
+        };
+
+        stream.insert(futures::stream::once(async move {
+            let next_fut = next(&mut procedure_stream);
+            pin_mut!(next_fut);
+
+            match futures::future::poll_fn(|cx| {
+                if let Some(flush_tx) = flush_tx_opt.take() {
+                    FLUSHED.set(Some(flush_tx));
+
+                    let res = next_fut.poll_unpin(cx);
+
+                    flush_tx_opt = FLUSHED.take();
+
+                    res
+                } else {
+                    next_fut.poll_unpin(cx)
+                }
+            })
+            .await
+            {
+                Some(Ok(value)) => (200, value),
+                Some(Err(NextError::Procedure(status, body))) => {
+                    (status.as_u16(), rspc_err_json!(body))
+                }
+                Some(Err(NextError::Resolver(resolver_error))) => {
+                    (500, json!(resolver_error.value()))
+                }
+                None => (500, rspc_err_json!("procedure didn't produce a value")),
+                _ => unreachable!(),
+            }
+        }));
+    }
+
+    if stream_response {
+        let stream = futures::stream::unfold(stream, |mut stream| async move {
+            loop {
+                let Some((item, i)) = stream.next().await else {
+                    return None;
+                };
+
+                match item {
+                    StreamYield::Item(item) => {
+                        let stream_index = i - 1;
+
+                        let out = format!(
+                            "{stream_index}:{}\n",
+                            serde_json::to_string(&item)
+                                .expect("failed to stringify serde_json::Value")
+                        );
+                        return Some((Ok::<_, Infallible>(out), stream));
                     }
-                })).await {
-                    Ok(_) => {}
-                    Err(_err) => {
-                        // #[cfg(feature = "tracing")]
-                        // tracing::error!("Error sending websocket message: {}", _err);
-
+                    StreamYield::Finished(s) => {
+                        s.remove(Pin::new(&mut stream));
                         continue;
                     }
                 }
             }
-            msg = socket.next() => {
-                match msg {
-                    Some(Ok(msg)) => {
-                       let res = match msg {
-                            Message::Text(text) => serde_json::from_str::<Value>(&text),
-                            Message::Binary(binary) => serde_json::from_slice(&binary),
-                            Message::Ping(_) | Message::Pong(_) | Message::Close(_) => {
-                                continue;
-                            }
-                        };
+        });
 
-                        match res.and_then(|v| match v.is_array() {
-                            true => serde_json::from_value::<Vec<jsonrpc::Request>>(v),
-                            false => serde_json::from_value::<jsonrpc::Request>(v).map(|v| vec![v]),
-                        }) {
-                            Ok(reqs) => {
-                                for request in reqs {
-                                    let ctx = match ctx_fn.exec(parts.clone(), &state).await {
-                                        Ok(ctx) => {
-                                            ctx
-                                        },
-                                        Err(_err) => {
+        let body = if flushes.is_empty() {
+            Body::from_stream(stream)
+        } else {
+            let (mut tx, rx) = futures::channel::mpsc::channel(1);
 
-                                            // #[cfg(feature = "tracing")]
-                                            // tracing::error!("Error executing context function: {}", _err);
-
-                                            continue;
-                                        }
-                                    };
-
-                                    handle_json_rpc(ctx, request, &procedures, &mut Sender::Channel(&mut tx),
-                                    &mut SubscriptionMap::Ref(&mut subscriptions)).await;
-                                }
-                            },
-                            Err(_err) => {
-                                // #[cfg(feature = "tracing")]
-                                // tracing::error!("Error parsing websocket message: {}", _err);
-
-                                // TODO: Send report of error to frontend
-
-                                continue;
-                            }
-                        };
-                    }
-                    Some(Err(_err)) => {
-                        // #[cfg(feature = "tracing")]
-                        // tracing::error!("Error in websocket: {}", _err);
-
-                        // TODO: Send report of error to frontend
-
-                        continue;
-                    },
-                    None => {
-                        // #[cfg(feature = "tracing")]
-                        // tracing::debug!("Shutting down websocket connection");
-
-                        // TODO: Send report of error to frontend
-
+            tokio::spawn(async move {
+                pin_mut!(stream);
+                while let Some(item) = stream.next().await {
+                    if let Err(_) = tx.send(item).await {
                         return;
-                    },
+                    }
                 }
+            });
+
+            futures::future::join_all(flushes).await;
+
+            Body::from_stream(rx.into_stream())
+        };
+
+        Response::builder()
+            .header("Transfer-Encoding", "chunked")
+            .body(body)
+            .unwrap()
+    } else {
+        let mut responses = vec![None; stream.len()];
+
+        while let Some((item, i)) = stream.next().await {
+            let stream_index = i - 1;
+
+            match item {
+                StreamYield::Item(item) => {
+                    responses[stream_index].get_or_insert(item);
+                }
+                StreamYield::Finished(s) => {
+                    s.remove(Pin::new(&mut stream));
+                }
+            };
+        }
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&responses).unwrap()))
+            .unwrap()
+    }
+}
+
+enum NextError {
+    Procedure(StatusCode, String),
+    Resolver(ResolverError),
+}
+
+async fn next(stream: &mut ProcedureStream) -> Option<Result<serde_json::Value, NextError>> {
+    stream.next().await.map(|v| {
+        v.map_err(|err| match err {
+            ProcedureError::NotFound => {
+                NextError::Procedure(StatusCode::NOT_FOUND, err.message().to_string())
+            }
+            ProcedureError::Deserialize(_) => NextError::Procedure(
+                StatusCode::BAD_REQUEST,
+                "error deserializing procedure arguments".to_string(),
+            ),
+            ProcedureError::Downcast(_) => {
+                NextError::Procedure(StatusCode::INTERNAL_SERVER_ERROR, err.message().to_string())
+            }
+            ProcedureError::Resolver(resolver_err) => NextError::Resolver(resolver_err),
+            // `message()` is "resolver panic", so the payload never reaches the client.
+            ProcedureError::Unwind(_) => {
+                NextError::Procedure(StatusCode::INTERNAL_SERVER_ERROR, err.message().to_string())
+            }
+        })
+        .and_then(|v| {
+            let Some(value) = v.as_serialize() else {
+                return Err(NextError::Procedure(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "procedure returned a non-serializable value".to_string(),
+                ));
+            };
+
+            value
+                .serialize(serde_json::value::Serializer)
+                .map_err(|_| {
+                    NextError::Procedure(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "failed to serialize procedure result".to_string(),
+                    )
+                })
+        })
+    })
+}
+
+#[cfg(test)]
+mod test {
+    use axum::{
+        body::Bytes,
+        http::{self, HeaderValue},
+    };
+    use futures::StreamExt;
+    use rspc_procedure::{Procedure, ProcedureStream};
+
+    use super::*;
+
+    struct Executor<'a, TCtx, TState, TCtxFnMarker, TCtxFn> {
+        procedure: &'a Procedure<TCtx>,
+        ctx_fn: TCtxFn,
+        state: TState,
+        phantom: std::marker::PhantomData<(TState, TCtxFnMarker)>,
+        input: Result<Option<Value>, serde_json::Error>,
+        request: http::request::Builder,
+    }
+
+    impl<'a, TCtx, TCtxFnMarker, TCtxFn> Executor<'a, TCtx, (), TCtxFnMarker, TCtxFn> {
+        pub fn new(
+            procedure: &'a Procedure<TCtx>,
+            ctx_fn: TCtxFn,
+        ) -> Executor<'a, TCtx, (), TCtxFnMarker, TCtxFn> {
+            Executor {
+                procedure,
+                ctx_fn,
+                phantom: Default::default(),
+                state: (),
+                input: Ok(None),
+                request: http::request::Builder::new(),
             }
         }
     }
+
+    impl<'a, TCtx, TState, TCtxFnMarker, TCtxFn> Executor<'a, TCtx, TState, TCtxFnMarker, TCtxFn>
+    where
+        TCtx: Send + Sync + 'static,
+        TCtxFn: TCtxFunc<TCtx, TState, TCtxFnMarker>,
+        TState: Send + Sync + 'static,
+    {
+        pub fn with_input(mut self, input: Result<Option<Value>, serde_json::Error>) -> Self {
+            self.input = input;
+            self
+        }
+
+        pub fn modify_request(
+            mut self,
+            request: impl FnOnce(http::request::Builder) -> http::request::Builder,
+        ) -> Self {
+            self.request = request(self.request);
+            self
+        }
+
+        async fn execute(self) -> (http::response::Parts, Bytes) {
+            let (parts, body) = handle_procedure::<TCtx, _, _, TState>(
+                self.ctx_fn,
+                self.input,
+                self.request.body(Body::empty()).unwrap().into_parts().0,
+                self.procedure,
+                self.state,
+            )
+            .await
+            .into_parts();
+            let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+            (parts, bytes)
+        }
+    }
+
+    fn assert_json(parts: &http::response::Parts, body: Bytes) -> Value {
+        assert_eq!(
+            parts.headers.get("Content-Type"),
+            Some(&HeaderValue::from_str("application/json").unwrap())
+        );
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    fn assert_sse(parts: &http::response::Parts, body: Bytes) -> Vec<Value> {
+        assert_eq!(
+            parts.headers.get("Content-Type"),
+            Some(&HeaderValue::from_str("text/event-stream").unwrap())
+        );
+        std::str::from_utf8(&body)
+            .unwrap()
+            .split("\n\n")
+            .filter_map(|s| {
+                if s.starts_with("data: ") {
+                    let data = &s["data: ".len()..];
+                    if data == "stopped" {
+                        None
+                    } else {
+                        Some(serde_json::from_str(data).unwrap())
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<Value>>()
+    }
+
+    fn assert_rspc_err(parts: &http::response::Parts, body: &Value, status: StatusCode) {
+        assert_eq!(parts.status, status);
+        assert_eq!(body["~rspc"], true);
+        assert!(body["message"].is_string());
+    }
+
+    #[tokio::test]
+    async fn query_200() {
+        let procedure =
+            Procedure::new(|_: (), _| ProcedureStream::from_future(async { Ok("Value") }));
+        let (parts, body) = Executor::new(&procedure, || ()).execute().await;
+        let body = assert_json(&parts, body);
+
+        assert_eq!(body, json!("Value"))
+    }
+
+    #[tokio::test]
+    async fn stream_200() {
+        let procedure = Procedure::<()>::new(|_, _| {
+            ProcedureStream::from_stream(futures::stream::iter([1, 2, 3]).map(|v| Ok(v)))
+        });
+
+        let (parts, body) = Executor::new(&procedure, || ())
+            .modify_request(|b| b.header("Accept", "text/event-stream"))
+            .execute()
+            .await;
+        let events = assert_sse(&parts, body);
+
+        assert_eq!(
+            events,
+            vec![
+                json!({ "item": 1 }),
+                json!({ "item": 2 }),
+                json!({ "item": 3 }),
+            ]
+        )
+    }
+
+    #[tokio::test]
+    async fn stream_resolver_error() {
+        let procedure = Procedure::<()>::new(|_, _| {
+            ProcedureStream::from_stream(futures::stream::iter([
+                Ok(1),
+                Err(ProcedureError::Resolver(ResolverError::new(
+                    json!("error"),
+                    None::<Infallible>,
+                ))),
+                Ok(3),
+            ]))
+        });
+
+        let (parts, body) = Executor::new(&procedure, || ())
+            .modify_request(|b| b.header("Accept", "text/event-stream"))
+            .execute()
+            .await;
+        let events = assert_sse(&parts, body);
+
+        assert_eq!(
+            events,
+            vec![
+                json!({ "item": 1 }),
+                json!({ "error": { "status": 500, "data": "error" }}),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_input_400() {
+        let procedure = Procedure::new(|_: (), _| ProcedureStream::from_future(async { Ok(()) }));
+
+        let (parts, body) = Executor::new(&procedure, || ())
+            .with_input(serde_json::from_slice(&[]))
+            .execute()
+            .await;
+        let body = assert_json(&parts, body);
+
+        assert_rspc_err(&parts, &body, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn failed_ctx_500() {
+        let procedure = Procedure::new(|_: (), _| ProcedureStream::from_future(async { Ok(()) }));
+
+        let (parts, body) = Executor::new(&procedure, |_: tower_cookies::Cookies| ())
+            .execute()
+            .await;
+        let body = assert_json(&parts, body);
+
+        assert_rspc_err(&parts, &body, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn no_value_500() {
+        let procedure = Procedure::new(|_: (), _| {
+            ProcedureStream::from_stream(futures::stream::empty::<Result<(), _>>())
+        });
+
+        let (parts, body) = Executor::new(&procedure, || ()).execute().await;
+        let body = assert_json(&parts, body);
+
+        assert_rspc_err(&parts, &body, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn typesafe_error_500() {
+        #[derive(Serialize)]
+        struct CustomError {
+            message: String,
+        }
+
+        let procedure = Procedure::new(|_: (), _| {
+            ProcedureStream::from_future(async {
+                Err::<(), _>(ProcedureError::Resolver(ResolverError::new(
+                    CustomError {
+                        message: "error".to_string(),
+                    },
+                    None::<Infallible>,
+                )))
+            })
+        });
+
+        let (parts, body) = Executor::new(&procedure, || ()).execute().await;
+        let body = assert_json(&parts, body);
+
+        assert_eq!(parts.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            body,
+            json!(CustomError {
+                message: "error".to_string()
+            })
+        );
+    }
+
+    // #[tokio::test]
+    // async fn batch_query() {
+    //     handle_batch(ctx_fn, inputs, req_parts, state, manual_stream_flushing)
+    // }
 }

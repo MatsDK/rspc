@@ -1,23 +1,16 @@
-import { createClient as createLegacyClient } from "@rspc/client/legacy";
-import { TauriTransport } from "@rspc/tauri/legacy";
-
 import { createClient } from "@rspc/client";
 import { tauriExecute } from "@rspc/tauri";
 
-import { Procedures, ProceduresLegacy } from "../../bindings";
+import { Procedures } from "../../bindings";
 
 import "./App.css";
 
-const legacyClient = createLegacyClient<ProceduresLegacy>({
-	transport: new TauriTransport(),
-});
 const client = createClient<Procedures>(tauriExecute);
 
 function App() {
 	client.sendMsg.mutate("bruh").then(console.log);
 
-	legacyClient.mutation(["sendMsg", "bruh2"]).then(console.log);
-	legacyClient.addSubscription(["basicSubscription", null], {
+	const subscription = client.basicSubscription.subscribe(null, {
 		onData: (d) => {
 			console.log("subscription", d);
 		},
@@ -26,6 +19,7 @@ function App() {
 	return (
 		<main class="container">
 			<h1>Welcome to Tauri + Solid</h1>
+			<button onClick={() => subscription.unsubscribe()}>Unsubscribe</button>
 		</main>
 	);
 }

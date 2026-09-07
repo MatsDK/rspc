@@ -9,24 +9,23 @@ code wins.
 | --- | --- |
 | **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
 | **State** | Core is sound, all three framework clients are on v2, CI green across the feature matrix |
-| **Next** | The two remaining reachable panics, then real `meta.name()` — which unblocks `cache` and `invalidation` |
+| **Next** | Real `meta.name()` — which unblocks `cache` and `invalidation` (SFM) |
 
 **What still stands between this and a working library.** Docs and publishing are out of
 scope here — the docs site is its own repo, and releasing is gated on the naming decision
 (§2) rather than on code.
 
-1. `integrations/axum/src/next.rs:508` — a panicking procedure still `panic!()`s the request
-   task. `examples/core`'s `newstuffpanic` demonstrates it.
-2. `crates/procedure/src/stream.rs:466` — `todo!()` when a value fails to serialise
-   mid-stream.
-3. `rspc/src/procedure.rs:80,93` — `meta.name()` is the literal `"todo"`. This makes
+1. `rspc/src/procedure.rs:80,93` — `meta.name()` is the literal `"todo"`. This makes
    `crates/cache` **actively wrong** (its key is also `"todo"`, so every cached procedure
    shares one slot) and forces `crates/invalidation` to hardcode `"sfmPost"`.
-4. `flush()` is a public no-op — finish the backpressure mechanism or delete the function.
-5. `batch: false, stream: true` is advertised in the client config type and unimplemented.
+2. `flush()` is a public no-op — finish the backpressure mechanism or delete the function.
+3. WebSockets no longer exist at all: the JSON-RPC integration was deleted, so reviving them
+   means a fresh implementation against the v2 wire format (`D-2` is now moot).
+4. `fetchExecute`'s batch loader is still module-global, and a throw inside its `setTimeout`
+   leaves every queued caller hanging.
 
-**Verified green:** `cargo check --workspace`; the feature matrix (`legacy` on/off, `ws`
-on/off, `--no-default-features`); `pnpm build`; `pnpm typecheck`.
+**Verified green:** `cargo check --workspace`; the feature matrix (`legacy` on/off,
+`--no-default-features`); `pnpm build`; `pnpm typecheck`; `cargo check -p aion` downstream.
 **Not verified:** `cargo test --workspace`, which CI runs — `cargo test` is off-limits in
 this workspace and an axum assertion changed (`__rspc` → `~rspc`).
 
@@ -74,8 +73,11 @@ call for a private consumer that never used v1 syntax and the wrong one for the 
 which would have lost the only bridge its inherited users have. `legacy` is now an opt-in
 feature rather than a default.
 
-The same logic applies to the v1 client and the JSON-RPC/WebSocket transport: they are not
-dead weight to be cleared away, they are the compatibility surface.
+That reasoning covers the *server syntax* only. The JSON-RPC/WebSocket transport was
+deleted: v1-syntax procedures are served over v2's HTTP+SSE, so v1 syntax migrates but v1
+**clients** must upgrade. The consequence is that `@rspc/client/legacy`, `query-core` and
+the `*/legacy` bindings are now a client for a protocol nothing speaks — worth deciding on
+deliberately (`D-9`).
 
 ---
 
@@ -117,12 +119,13 @@ not what it intends.
 
 | Transport                | State | Evidence                                                                                             |
 | ------------------------ | ----- | -------------------------------------------------------------------------------------------------------- |
-| HTTP single (v2)         | ✅    | `integrations/axum/src/next.rs`                                                                          |
+| HTTP single (v2)         | ✅    | `integrations/axum/src/endpoint.rs`                                                                      |
 | HTTP batch (v2)          | 🟡    | Implemented, **untested** — `batch_query` is a commented-out stub at the end of `next.rs`                  |
 | HTTP batch + streaming   | 🟡    | Custom `\d+:[…]\n` line protocol, undocumented and untested                                               |
+| HTTP single + streaming  | ✅    | `Accept: text/event-stream` on a one-off request, frames buffered into an array                            |
 | SSE subscriptions (v2)   | ✅    | Teardown and browser-managed reconnect. No resume: a reconnect restarts the subscription, so servers should emit initial state on subscribe |
-| **WebSocket**            | 🟡    | **Implemented and v2-shaped, but not compiled in.** `endpoint.rs:41-61,204-309` has the upgrade + `handle_websocket`, and imports `rspc_procedure::{Procedure, Procedures}` — the v2 runtime types. Blocked only by `// mod endpoint;` at `lib.rs:9`, plus axum-0.7 path syntax (`"/:id"`, `endpoint.rs:33`) vs 0.8's `"/{id}"` |
-| JSON-RPC wire format     | 🟡    | `jsonrpc.rs` + `jsonrpc_exec.rs`, compiled but currently unreachable. The wire format v1 clients speak    |
+| **WebSocket**            | ❌    | Deleted with the JSON-RPC integration. Reviving it means a fresh implementation against the v2 wire format |
+| JSON-RPC wire format     | ❌    | Deleted. Recoverable from git history if a compat transport is ever wanted                                 |
 | Tauri IPC                | ✅    | `integrations/tauri` — the most complete integration in the repo, including abort support (`lib.rs:131-135`) |
 
 **Clients**
@@ -742,6 +745,11 @@ serializer instead of the macro.
 **`D-8` — Wire up or delete `ProcedureError::NotFound`?** Never constructed anywhere; both
 integrations meet it with `unimplemented!()`. Folded into `D-7`: wiring it up is what lets
 the envelope be produced in one place.
+
+**`D-9` — Do the v1 TypeScript packages stay, now that no server speaks JSON-RPC?**
+`@rspc/client/legacy`, `@rspc/query-core`, `@rspc/tanstack-query` and the `*/legacy` bindings
+are a client for a wire format neither integration serves any more. Either delete them, or
+revive a compat transport. Leaving them is the one option that misleads.
 
 **`D-1` — Does the v1 compatibility layer stay?**
 **Recommendation: yes, and it is close to non-negotiable.** Upstream is gone, so this fork is

@@ -6,17 +6,7 @@
     html_favicon_url = "https://github.com/specta-rs/rspc/raw/main/.github/logo.png"
 )]
 
-// mod endpoint;
+mod endpoint;
 mod extractors;
-mod jsonrpc;
-mod jsonrpc_exec;
-// mod legacy;
-pub mod next;
-mod request;
 
-// pub use endpoint::endpoint;
-
-// pub use endpoint::Endpoint;
-// pub use request::AxumRequest;
-// pub use v2::{Endpoint, flush};
-pub use next::{Endpoint, flush};
+pub use endpoint::{Endpoint, flush};

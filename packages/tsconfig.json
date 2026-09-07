@@ -23,7 +23,6 @@
 			"@rspc/svelte-query/legacy": ["./svelte-query/src/legacy/index.ts"],
 			"@rspc/svelte-query/*": ["./svelte-query/src/*"],
 			"@rspc/tauri": ["./tauri/src/index.ts"],
-			"@rspc/tauri/legacy": ["./tauri/src/legacy/index.ts"],
 			"@rspc/tauri/*": ["./tauri/src/*"]
 		}
 	}

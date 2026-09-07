@@ -446,7 +446,7 @@ impl<F: FnMut(Result<DynOutput, ProcedureError>) -> Result<T, String>, T> Proced
 impl<F: FnMut(Result<DynOutput, ProcedureError>) -> Result<T, String> + Unpin, T> Stream
     for ProcedureStreamMap<F, T>
 {
-    type Item = T;
+    type Item = Result<T, String>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -457,15 +457,7 @@ impl<F: FnMut(Result<DynOutput, ProcedureError>) -> Result<T, String> + Unpin, T
             Some(Err(err)) => Err(err),
         };
 
-        match (this.map)(value) {
-            Ok(v) => Poll::Ready(Some(v)),
-            // TODO: Exposing this error to the client or not?
-            // TODO: Error type???
-            Err(err) => {
-                println!("Error serialzing {err:?}");
-                todo!();
-            }
-        }
+        Poll::Ready(Some((this.map)(value)))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

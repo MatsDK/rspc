@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 rspc = { path = "../../rspc", features = ["typescript", "rust", "legacy"] }
-rspc-axum = { path = "../../integrations/axum", features = ["ws"] }
+rspc-axum = { path = "../../integrations/axum" }
 rspc-devtools = { version = "0.0.0", path = "../../crates/devtools" }
 rspc-invalidation = { version = "0.0.0", path = "../../crates/invalidation" }
 rspc-zer = { version = "0.0.0", path = "../../crates/zer" }
