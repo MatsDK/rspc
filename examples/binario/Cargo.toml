@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-rspc = { path = "../../rspc", features = ["typescript", "rust"] }
+rspc = { path = "../../rspc", features = ["typescript"] }
 rspc-binario = { version = "0.0.0", path = "../../crates/binario" }
 specta = { workspace = true, features = ["derive"] }
 tokio = { version = "1.43.0", features = ["full"] }

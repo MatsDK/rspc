@@ -21,7 +21,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 
 typescript = ["dep:specta-typescript", "dep:serde_json"]
-rust = [] # TODO: "dep:specta-rust"]
 
 legacy = ["dep:rspc-legacy", "dep:serde_json"]
 

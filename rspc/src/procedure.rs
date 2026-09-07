@@ -30,7 +30,7 @@ use std::{borrow::Cow, marker::PhantomData, panic::Location, sync::Arc};
 
 use futures_util::{FutureExt, TryStreamExt};
 
-use specta::{datatype::DataType, Generics, Type};
+use specta::{datatype::DataType, Type};
 
 use crate::{Error, Extension, ProcedureKind, State};
 

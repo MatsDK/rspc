@@ -1,15 +1,18 @@
-use std::{borrow::Cow, collections::BTreeMap, iter::once, path::Path};
+use std::{borrow::Cow, collections::BTreeMap, path::Path};
 
 use serde_json::json;
-use specta::{datatype::DataType, NamedType, Type};
-use specta_typescript::{
-    datatype, export_named_datatype, BigIntExportBehavior, CommentFormatterFn, ExportError,
-    FormatterFn,
-};
+use specta_typescript::{datatype, BigIntExportBehavior, CommentFormatterFn, ExportError, FormatterFn};
 
-use crate::{
-    procedure::ProcedureType, types::TypesOrType, util::literal_object, ProcedureKind, Types,
-};
+use crate::{procedure::ProcedureType, types::TypesOrType, ProcedureKind, Types};
+
+#[cfg(feature = "legacy")]
+use std::iter::once;
+#[cfg(feature = "legacy")]
+use specta::{datatype::DataType, NamedType, Type};
+#[cfg(feature = "legacy")]
+use specta_typescript::export_named_datatype;
+#[cfg(feature = "legacy")]
+use crate::util::literal_object;
 
 pub struct Typescript {
     inner: specta_typescript::Typescript,
@@ -62,6 +65,7 @@ impl Typescript {
     }
 
     pub fn export_to(&self, path: impl AsRef<Path>, types: &Types) -> Result<(), ExportError> {
+        #[cfg_attr(not(feature = "legacy"), allow(unused_mut, unused_variables))]
         let mut typess = types.types.clone();
 
         #[cfg(feature = "legacy")]
@@ -94,7 +98,7 @@ impl Typescript {
 
             bindings += "export { Procedures } from './bindings_t';";
         } else {
-            generate_bindings(&mut bindings, self, types, |_, _, _| {});
+            generate_bindings(&mut bindings, self, types, |_, _, _| {})?;
         }
         std::fs::write(&path, bindings)?;
         self.inner.format(&path)?;
@@ -122,7 +126,7 @@ impl Typescript {
                     ),
                     procedure_type.location.file().to_string(),
                 );
-            });
+            })?;
             d_ts_file += &format!("\n//# sourceMappingURL={d_ts_map_file_name}");
 
             // std::fs::write(&path, bindings)?;
@@ -142,6 +146,7 @@ impl Typescript {
     }
 
     pub fn export(&self, types: &Types) -> Result<String, ExportError> {
+        #[cfg_attr(not(feature = "legacy"), allow(unused_mut, unused_variables))]
         let mut typess = types.types.clone();
 
         #[cfg(feature = "legacy")]
@@ -172,7 +177,7 @@ fn generate_bindings(
     this: &Typescript,
     types: &Types,
     mut on_procedure: impl FnMut(&Cow<'static, str>, (usize, usize), &ProcedureType),
-) {
+) -> Result<(), ExportError> {
     fn inner(
         out: &mut String,
         this: &Typescript,
@@ -181,7 +186,7 @@ fn generate_bindings(
         source_pos: (usize, usize),
         key: &Cow<'static, str>,
         item: &TypesOrType,
-    ) {
+    ) -> Result<(), ExportError> {
         match item {
             TypesOrType::Type(procedure_type) => {
                 on_procedure(&key, source_pos, procedure_type);
@@ -199,24 +204,21 @@ fn generate_bindings(
                     &this.inner,
                     &specta::datatype::FunctionResultVariant::Value(procedure_type.input.clone()),
                     &types.types,
-                )
-                .unwrap(); // TODO: Error handling
+                )?;
 
                 *out += ", output: ";
                 *out += &datatype(
                     &this.inner,
                     &specta::datatype::FunctionResultVariant::Value(procedure_type.output.clone()),
                     &types.types,
-                )
-                .unwrap(); // TODO: Error handling
+                )?;
 
                 *out += ", error: ";
                 *out += &datatype(
                     &this.inner,
                     &specta::datatype::FunctionResultVariant::Value(procedure_type.error.clone()),
                     &types.types,
-                )
-                .unwrap(); // TODO: Error handling
+                )?;
 
                 *out += " }";
             }
@@ -233,13 +235,15 @@ fn generate_bindings(
 
                     *out += key;
                     *out += ": ";
-                    inner(out, this, on_procedure, types, source_pos, key, &item);
+                    inner(out, this, on_procedure, types, source_pos, key, item)?;
                     *out += ",\n";
                 }
 
                 *out += "}";
             }
         }
+
+        Ok(())
     }
 
     *out += "export type Procedures = ";
@@ -253,7 +257,7 @@ fn generate_bindings(
         // We know this is only used in `TypesOrType::Type` and we don't parse that so it's value means nothing.
         &"".into(),
         &TypesOrType::Types(types.procedures.clone()),
-    );
+    )
 }
 
 fn construct_file(this: &Typescript) -> String {

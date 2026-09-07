@@ -11,6 +11,14 @@ code wins.
 | **State** | Core is sound, all three framework clients are on v2, CI green across the feature matrix |
 | **Next** | `flush()` — finish the backpressure mechanism or delete the public no-op |
 
+Core cleanup pass: `rspc` compiles with **zero warnings**, core TODOs down 151 → 134. Removed
+the dead `rspc/src/mod.rs` orphan (it declared a module that never existed), `logger.rs` (all
+commented out), and the `rust` language feature — `languages/rust.rs` had zero non-comment
+lines, so the flag compiled an empty module, the same lie the `ws` flag was. Legacy-only
+imports are now `cfg`-gated so neither feature state warns. The export path no longer
+`.unwrap()`s each `DataType`→string conversion; `generate_bindings` returns `ExportError`,
+which matters because export usually runs in a build script.
+
 **What still stands between this and a working library.** Docs and publishing are out of
 scope here — the docs site is its own repo, and releasing is gated on the naming decision
 (§2) rather than on code.
@@ -110,7 +118,7 @@ not what it intends.
 | TypeScript (v2)        | 🟡    | Correct for all three kinds; every `DataType`→string conversion is still an `.unwrap()` (`languages/typescript.rs:203,211,219`) |
 | TypeScript (v1 shape)  | ✅    | `ProceduresLegacy` emission, `#[cfg(feature = "legacy")]` at `typescript.rs:67-82`. Part of the compat surface |
 | TypeScript source maps | 🟡    | Behind a flag that prints "unstable feature" at runtime                                              |
-| Rust                   | ❌    | `languages/rust.rs` is `//! TODO: Bring this back when published.` plus ~85 commented-out lines. Enabling the `rust` feature compiles an empty module |
+| Rust                   | ❌    | Removed. The module was entirely commented out and the `rust` feature compiled nothing        |
 | OpenAPI                | ❌    | `crates/openapi` serves a static Swagger page; all route generation is commented out (`lib.rs:101-232`) |
 
 **Transports** — richer than it first looks; the issue is wiring, not absence.
@@ -538,12 +546,10 @@ defaulted `ResolverOutput::item_data_type`.
 
 1. **Restore `rspc/tests/typescript.rs`** — uncomment, repair, add a subscription case, and
    cover the `ProceduresLegacy` output too so the compat bindings don't silently regress.
-3. **Replace export-path `.unwrap()`s** (`typescript.rs:203,211,219`, plus the source-map
-   writer) with real errors. Export usually runs in a build script; panicking there is a
-   terrible failure mode.
-4. **Decide on the Rust exporter.** Finish `languages/rust.rs` or delete the module and the
-   feature — an advertised flag that does nothing is a bug report waiting to happen.
-5. **Decide on OpenAPI.** Same call for `crates/openapi`.
+3. **Source-map path still `.unwrap()`s** on `file_stem`/`parent` (`typescript.rs:107-111`).
+   Lower stakes than the main path, which now propagates `ExportError`.
+4. **Decide on OpenAPI.** `crates/openapi` serves a static Swagger page with all route
+   generation commented out — the same shape as the `rust` exporter that was just removed.
 
 **Exit:** bindings correct for all three procedure kinds in both v1 and v2 shapes, asserted
 by test; no feature flag is a silent no-op.

@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-rspc = { path = "../../rspc", features = ["typescript", "rust", "legacy"] }
+rspc = { path = "../../rspc", features = ["typescript", "legacy"] }
 rspc-axum = { path = "../../integrations/axum" }
 rspc-devtools = { version = "0.0.0", path = "../../crates/devtools" }
 rspc-invalidation = { version = "0.0.0", path = "../../crates/invalidation" }

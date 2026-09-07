@@ -20,7 +20,6 @@ mod dyn_input;
 mod dyn_output;
 mod error;
 mod interop;
-mod logger;
 mod procedure;
 mod procedures;
 mod state;

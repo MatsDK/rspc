@@ -173,8 +173,6 @@ impl<TCtx> Router<TCtx> {
 
         Ok((
             Procedures::new(procedures, state),
-            // TODO: Get rid of this and have `rspc-tracing` mount it
-            // .with_logger(|event| println!("{event:?}")),
             Types {
                 types: self.types,
                 procedures: procedure_types,

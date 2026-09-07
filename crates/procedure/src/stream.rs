@@ -4,7 +4,6 @@ use std::{
     future::{poll_fn, Future},
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::Arc,
     task::{ready, Context, Poll, Waker},
 };
 

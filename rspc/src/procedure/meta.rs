@@ -21,14 +21,8 @@ use std::{borrow::Cow, sync::Arc};
 use crate::{ProcedureKind, State};
 
 #[derive(Debug, Clone)]
-enum ProcedureName {
-    Static(&'static str),
-    Dynamic(Arc<String>),
-}
-
-#[derive(Debug, Clone)]
 pub struct ProcedureMeta {
-    name: ProcedureName,
+    name: Arc<str>,
     kind: ProcedureKind,
     state: Arc<State>,
 }
@@ -36,7 +30,7 @@ pub struct ProcedureMeta {
 impl ProcedureMeta {
     pub(crate) fn new(name: Cow<'static, str>, kind: ProcedureKind, state: Arc<State>) -> Self {
         Self {
-            name: ProcedureName::Dynamic(Arc::new(name.into_owned())),
+            name: name.into_owned().into(),
             kind,
             state,
         }
@@ -45,10 +39,7 @@ impl ProcedureMeta {
 
 impl ProcedureMeta {
     pub fn name(&self) -> &str {
-        match &self.name {
-            ProcedureName::Static(name) => name,
-            ProcedureName::Dynamic(name) => name.as_str(),
-        }
+        &self.name
     }
 
     pub fn kind(&self) -> ProcedureKind {
