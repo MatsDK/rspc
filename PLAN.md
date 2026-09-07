@@ -481,6 +481,13 @@ the same change.
 **Done, ahead of Phase G.** Moving first means the remaining Phase F work (React, Svelte 5)
 gets written at final paths instead of being moved afterwards.
 
+One knock-on worth recording: making `legacy` opt-in (Phase A) meant `examples/bindings.ts`
+stopped emitting `ProceduresLegacy`, which `examples/tauri/src/App.tsx` imports. Both
+examples that write that file — `examples/axum` and `examples/tauri` — now enable the
+`legacy` feature, which also keeps the v1→v2 bridge exercised rather than merely present.
+That file being written by two different examples is a pre-existing wart worth fixing in
+Phase H.
+
 ---
 
 ## 3. The plan

@@ -1,5 +1,5 @@
 import { createClient as createLegacyClient } from "@rspc/client/legacy";
-import { TauriTransport } from "@rspc/tauri";
+import { TauriTransport } from "@rspc/tauri/legacy";
 
 import { createClient } from "@rspc/client";
 import { tauriExecute } from "@rspc/tauri";
