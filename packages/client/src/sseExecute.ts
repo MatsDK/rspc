@@ -8,8 +8,7 @@ interface SSEExecuteArgs {
 		url: string,
 		eventSourceInitDict?: EventSourceInit,
 	) => EventSource;
-	/// Called each time the transport drops and the browser retries. The subscription
-	/// restarts from scratch on reconnect - the server has no resume support.
+	/// Fires on each retry. The subscription restarts from scratch - there is no resume.
 	onReconnecting?: () => void;
 }
 
@@ -52,9 +51,7 @@ export function sseExecute(
 			}
 		};
 		sse.onerror = (e) => {
-			// `CONNECTING` means the browser is already retrying, so this is a blip, not a
-			// failure. Erroring here would end the observable and leave that retry running
-			// against the ~6-per-origin cap with nobody reading it.
+			// `CONNECTING` means the browser is already retrying, so this isn't fatal.
 			if (sse.readyState === EventSource.CONNECTING) {
 				sseArgs.onReconnecting?.();
 				return;
