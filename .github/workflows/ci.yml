@@ -24,7 +24,7 @@ jobs:
       - run: cargo check --workspace
 
       # Feature-gated code that nobody compiles is how this repo ended up half-built:
-      # `legacy` only built via workspace feature unification, and `ws` is a no-op today.
+      # `legacy` only ever built via workspace feature unification, which hid 16 errors.
       - name: Check feature matrix
         run: |
           cargo check -p rspc --no-default-features
