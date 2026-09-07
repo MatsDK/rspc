@@ -9,7 +9,19 @@ code wins.
 | --- | --- |
 | **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
 | **Doing** | Phase F — clients. Teardown landed; `client`/`tauri`/`react-query` moved v2 to root, v1 to `./legacy`, `./next` gone; React v2 binding written |
-| **Next** | Svelte 5 binding (what Aion ports onto), then extract the shared runtime from the three |
+| **Next** | Extract the shared runtime, now that Solid, React and Svelte all exist to extract *from* |
+
+All three framework bindings are on v2 and `pnpm build` + `pnpm typecheck` are both green
+for the first time. Svelte's `useSubscription` returns a `readable` store, so teardown runs
+when the last subscriber goes away — no `onDestroy` at the call site.
+
+**The build/typecheck failures were all one root cause:** three `@tanstack/query-core`
+instances (5.66, 5.79, 5.90) resolving from `^` ranges. Symptoms were an `onMutate` arity
+mismatch in v1 react-query, a TS2742 portability error in v1 query-core, and svelte-query
+silently emitting no `.d.ts` at all. Every `@tanstack/*` dep is now pinned exactly to
+`5.79.0`, giving a single instance. The v1 packages additionally have declaration emit off
+in their tsconfig — `tsc` cannot name a type that lives in one of query-core's internal
+chunk files, while tsup's dts rollup can, so the published types are unaffected.
 
 React is at parity with Solid: options proxy, `useSubscription`, `infer*` helpers, and a
 worked example in `examples/astro` that runs under `StrictMode` — which is the check that

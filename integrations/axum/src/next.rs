@@ -501,10 +501,9 @@ async fn next(stream: &mut ProcedureStream) -> Option<Result<serde_json::Value, 
                 StatusCode::BAD_REQUEST,
                 "error deserializing procedure arguments".to_string(),
             ),
-            ProcedureError::Downcast(_) => NextError::Procedure(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                err.message().to_string(),
-            ),
+            ProcedureError::Downcast(_) => {
+                NextError::Procedure(StatusCode::INTERNAL_SERVER_ERROR, err.message().to_string())
+            }
             ProcedureError::Resolver(resolver_err) => NextError::Resolver(resolver_err),
             ProcedureError::Unwind(err) => panic!("{err:?}"), // Restore previous behavior lol
                                                               // ProcedureError::Serializer(err) => panic!("{err:?}"),

@@ -2,7 +2,10 @@
 	"extends": "../tsconfig.json",
 	"compilerOptions": {
 		"jsx": "react-jsx",
-		"outDir": "dist"
+		"outDir": "dist",
+		"declaration": false,
+		"emitDeclarationOnly": false,
+		"declarationMap": false
 	},
 	"include": ["src/**/*"],
 	"exclude": ["dist/**/*"]

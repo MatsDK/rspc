@@ -24,20 +24,18 @@ impl rspc_client::Procedure for error {
     const KEY: &'static str = "error";
 }
 
-
 pub mod hello {
-	pub use super::Procedures;
-pub struct hello;
+    pub use super::Procedures;
+    pub struct hello;
 
-impl rspc_client::Procedure for hello {
-    type Input = ();
-    type Output = String;
-    type Error = ();
-    type Procedures = Procedures;
-    const KIND: rspc_client::ProcedureKind = rspc_client::ProcedureKind::Query;
-    const KEY: &'static str = "hello";
-}
-
+    impl rspc_client::Procedure for hello {
+        type Input = ();
+        type Output = String;
+        type Error = ();
+        type Procedures = Procedures;
+        const KIND: rspc_client::ProcedureKind = rspc_client::ProcedureKind::Query;
+        const KEY: &'static str = "hello";
+    }
 }
 pub struct pings;
 
@@ -82,4 +80,3 @@ impl rspc_client::Procedure for version {
     const KIND: rspc_client::ProcedureKind = rspc_client::ProcedureKind::Query;
     const KEY: &'static str = "version";
 }
-

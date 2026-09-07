@@ -6,7 +6,7 @@
 	"author": "Oscar Beaumont",
 	"license": "MIT",
 	"type": "module",
-	"source": "./src/index.tsx",
+	"source": "./src/index.ts",
 	"types": "./dist/index.d.ts",
 	"main": "./dist/index.js",
 	"module": "./dist/index.js",
@@ -18,9 +18,17 @@
 			"svelte": "./dist/index.js",
 			"default": "./dist/index.js"
 		},
+		"./legacy": {
+			"types": "./dist/legacy/index.d.ts",
+			"import": "./dist/legacy/index.js",
+			"svelte": "./dist/legacy/index.js",
+			"default": "./dist/legacy/index.js"
+		},
 		"./package.json": "./package.json"
 	},
-	"files": ["dist"],
+	"files": [
+		"dist"
+	],
 	"scripts": {
 		"build": "svelte-package --input ./src --output ./dist",
 		"test": "vitest"
@@ -32,13 +40,13 @@
 	"devDependencies": {
 		"@rspc/client": "workspace:*",
 		"@sveltejs/package": "^2.3.10",
-		"@tanstack/svelte-query": "^5.79.0",
+		"@tanstack/svelte-query": "5.79.0",
 		"tslib": "^2.8.1",
 		"typescript": "^5.7.3",
 		"vitest": "^3.0.5"
 	},
 	"peerDependencies": {
 		"@tanstack/svelte-query": "^5.0.0",
-		"svelte": ">=3 <5"
+		"svelte": "^4.0.0 || ^5.0.0"
 	}
 }
