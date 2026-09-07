@@ -1,5 +1,5 @@
-import type { OperationType, Transport } from "@rspc/client";
-import type { ProcedureKind } from "@rspc/client/next";
+import type { OperationType, Transport } from "@rspc/client/legacy";
+import type { ProcedureKind } from "@rspc/client";
 
 import { tauriExecute } from "./next";
 

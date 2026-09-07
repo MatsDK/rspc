@@ -1,11 +1,11 @@
-import type { VoidIfInputNull, SubscriptionObserver } from "@rspc/client/next";
+import type { VoidIfInputNull, SubscriptionObserver } from "@rspc/client";
 import {
 	type Client,
 	type Procedure,
 	type Procedures,
 	createProceduresProxy,
 	traverseClient,
-} from "@rspc/client/next";
+} from "@rspc/client";
 import * as tanstack from "@tanstack/solid-query";
 import { skipToken } from "@tanstack/solid-query";
 

@@ -1,4 +1,4 @@
-import { createClient, FetchTransport, WebsocketTransport } from "@rspc/client";
+import { createClient, FetchTransport, WebsocketTransport } from "@rspc/client/legacy";
 import { createReactQueryHooks } from "@rspc/react-query";
 import { QueryClient } from "@tanstack/react-query";
 import type { Procedures } from "../../bindings";

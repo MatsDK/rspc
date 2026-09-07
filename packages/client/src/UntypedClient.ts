@@ -1,3 +1,4 @@
+import type { Unsubscribable } from "./observable";
 import type { ExecuteArgs, ExecuteFn, SubscriptionObserver } from "./types";
 
 export class UntypedClient {
@@ -28,10 +29,10 @@ export class UntypedClient {
 		path: string,
 		input: unknown,
 		opts?: Partial<SubscriptionObserver<unknown, unknown>>,
-	) {
+	): Unsubscribable {
 		const observable = this.execute({ type: "subscription", path, input });
 
-		observable.subscribe({
+		return observable.subscribe({
 			next(event) {
 				switch (event.type) {
 					case "started": {

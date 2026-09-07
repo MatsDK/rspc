@@ -34,6 +34,7 @@ export const fetchExecute = (
 
 	if (!config.batch) {
 		const url = new URL(`${config.url}/${args.path}`);
+		const abort = new AbortController();
 
 		let promise;
 		if (args.type === "query") {
@@ -51,6 +52,7 @@ export const fetchExecute = (
 				headers: {
 					Accept: "application/json",
 				},
+				signal: abort.signal,
 			});
 		} else {
 			promise = fetch(url, {
@@ -60,6 +62,7 @@ export const fetchExecute = (
 					Accept: "application/json",
 				},
 				body: JSON.stringify(args.input),
+				signal: abort.signal,
 			});
 		}
 
@@ -76,6 +79,8 @@ export const fetchExecute = (
 				.catch((e) => {
 					subscriber.error(e.toString());
 				});
+
+			return () => abort.abort();
 		});
 	} else {
 		const type = args.type;

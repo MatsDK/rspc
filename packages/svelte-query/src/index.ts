@@ -1,4 +1,4 @@
-import type * as rspc from "@rspc/client";
+import type * as rspc from "@rspc/client/legacy";
 import * as queryCore from "@rspc/query-core";
 import * as tanstack from "@tanstack/svelte-query";
 import { onDestroy } from "svelte";

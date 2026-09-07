@@ -1,4 +1,4 @@
-import type { RSPCError } from "../error";
+import type { RSPCError } from "./error";
 import type { Observable } from "./observable";
 
 export type JoinPath<

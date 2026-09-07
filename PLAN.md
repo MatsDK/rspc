@@ -7,8 +7,16 @@ code wins.
 
 | | |
 | --- | --- |
-| **Branch** | `fix/procedure-error-propagation` off `6607673` |
-| **Next** | Phase E — port the WebSocket path back in |
+| **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
+| **Doing** | Phase F — clients. Teardown landed; `@rspc/client` moved v2 to root |
+| **Next** | React v2 binding, then extract the shared runtime, then Svelte 5 (what Aion ports onto) |
+
+**Phase E (WebSockets) is deliberately after F** — SSE already carries subscriptions, so WS
+is completeness, not a blocker. The client gap is what stops people using this.
+
+⚠️ **Nothing in Phase F is typechecked.** `tsc`/`pnpm build` are off-limits in this
+workspace, so every TS change here needs `pnpm --filter @rspc/client build` + `pnpm
+typecheck` run by hand before it can be trusted.
 
 **Done** (`6607673`, `30eadcf`, `1140a84`):
 
@@ -322,17 +330,26 @@ shape to copy three more times. Measuring what is actually framework-bound:
 
 | File                       | Lines | Framework-specific?                                                                 |
 | -------------------------- | ----- | ------------------------------------------------------------------------------------- |
-| `createOptionsProxy.ts`    | 181   | **Barely.** Its only Solid dependency is `import * as tanstack from "@tanstack/solid-query"` for `skipToken` and the option types. `skipToken` and the option shapes also exist in `@tanstack/query-core` |
+| `createOptionsProxy.ts`    | 181   | **Runtime: no. Types: yes.** See below                                                 |
 | `useSubscription.ts`       | 63    | **Genuinely.** `createEffect` + `createStore` from `solid-js`. There is no framework-agnostic way to write this |
 | `index.ts`                 | 11    | No — re-exports                                                                       |
 
-So roughly **180 of 255 lines are shareable** and are currently trapped inside the Solid
-package. Porting React and Svelte by copying it means maintaining the options proxy, the
-procedure-path proxy, and `inferInput`/`inferOutput`/`inferError` three times over — and
-they will drift, exactly as `query-core` and `tanstack-query` already drifted into
-byte-identical-but-separate copies.
+An earlier draft of this section claimed the proxy was "barely" Solid-specific and only
+needed its import re-pointed at `@tanstack/query-core`. **That was wrong**, and the reason
+matters:
 
-The split the code is already pointing at:
+- `createOptionsProxy.ts:26` reads `Omit<ReturnType<tanstack.UndefinedInitialDataOptions<…>>, …>`.
+  The `ReturnType<>` is there because **Solid's option types are accessor functions**. React's
+  are plain objects, so the same line is wrong for React.
+- `UndefinedInitialDataOptions`, `DefinedInitialDataOptions`, `UseMutationOptions` and the
+  `queryOptions()` helper live in the **framework** packages, not `@tanstack/query-core`.
+
+So the honest split is runtime-vs-types, not file-vs-file. The runtime — the path proxy and
+the `{queryKey, queryFn}` / `{mutationKey, mutationFn}` / `{subscribe, enabled}` objects it
+builds — is fully shareable, because `tanstack.queryOptions()` is effectively identity at
+runtime and exists only for inference. The option *types* have to be supplied per framework.
+
+The split the code is pointing at:
 
 ```
 @rspc/tanstack-query   ← shared, framework-agnostic. Built on @tanstack/query-core.
@@ -353,7 +370,19 @@ the context plumbing, which is the part that genuinely cannot be shared.
 
 **Consequence for the plan: `@rspc/tanstack-query` should be repurposed, not deleted.** The
 package name is right and the slot is needed; only its current contents (a stale copy of the
-v1 `query-core`) are wrong.
+v1 `query-core` — verified byte-identical with `diff`) are wrong.
+
+**Sequencing, given the types don't generalize for free:** port React *first*, as a second
+real implementation, and extract the shared runtime once two exist rather than guessing the
+abstraction from one. Then Svelte 5 lands on the extracted layer. Deciding the shape from
+Solid alone is how the `ReturnType<>` mistake above happened in the first place.
+
+**Prerequisite, now done:** the v2 client could not unsubscribe (§1.4). Solid tolerated it;
+React would not — StrictMode double-invokes effects, so every mount would open two SSE
+connections that could never close, against a ~6-per-origin cap. `observable` now takes a
+teardown, `UntypedClient.subscription` returns the handle its type always claimed,
+`sseExecute` closes the `EventSource` (including on error, where it previously leaked a
+retrying connection), and the non-batch `fetchExecute` aborts.
 
 ---
 

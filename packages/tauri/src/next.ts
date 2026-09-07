@@ -2,7 +2,7 @@ import {
 	type ExecuteArgs,
 	type ExecuteFn,
 	observable,
-} from "@rspc/client/next";
+} from "@rspc/client";
 import { Channel, invoke } from "@tauri-apps/api/core";
 
 type Request = { request: { path: string; input: any } } | { abort: number };

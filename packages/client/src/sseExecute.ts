@@ -49,7 +49,12 @@ export function sseExecute(
 			}
 		};
 		sse.onerror = (e) => {
+			// EventSource retries on its own, but the observable is done once it errors —
+			// without this the connection stays open against the ~6-per-origin cap.
+			sse.close();
 			o.error(e);
 		};
+
+		return () => sse.close();
 	});
 }

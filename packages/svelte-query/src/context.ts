@@ -1,4 +1,4 @@
-import type { ProceduresDef } from "@rspc/client";
+import type { ProceduresDef } from "@rspc/client/legacy";
 import type { Context } from "@rspc/query-core";
 import { getContext, setContext } from "svelte";
 

@@ -1,7 +1,7 @@
-import { createClient as createLegacyClient } from "@rspc/client";
+import { createClient as createLegacyClient } from "@rspc/client/legacy";
 import { TauriTransport } from "@rspc/tauri";
 
-import { createClient } from "@rspc/client/next";
+import { createClient } from "@rspc/client";
 import { tauriExecute } from "@rspc/tauri/next";
 
 import { Procedures, ProceduresLegacy } from "../../bindings";

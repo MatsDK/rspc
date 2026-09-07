@@ -1,6 +1,6 @@
 /** @jsxImportSource solid-js */
 
-import { createClient, fetchExecute, sseExecute, } from "@rspc/client/next";
+import { createClient, fetchExecute, sseExecute, } from "@rspc/client";
 import { createRSPCOptionsProxy, inferInput, inferOutput, useSubscription, } from "@rspc/solid-query";
 import { QueryClient, QueryClientProvider, useQuery, useMutation, skipToken } from "@tanstack/solid-query";
 import { Show } from "solid-js";

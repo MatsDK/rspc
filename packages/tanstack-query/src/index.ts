@@ -1,4 +1,4 @@
-import type * as rspc from "@rspc/client";
+import type * as rspc from "@rspc/client/legacy";
 import * as tanstack from "@tanstack/query-core";
 
 export function createTanstackQueryProxy<
