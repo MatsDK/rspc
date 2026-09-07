@@ -8,8 +8,8 @@ code wins.
 | | |
 | --- | --- |
 | **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
-| **Doing** | Phase F — clients. Teardown landed; `@rspc/client` and `@rspc/tauri` moved v2 to root, v1 to `./legacy`, `./next` gone |
-| **Next** | React v2 binding, then extract the shared runtime, then Svelte 5 (what Aion ports onto) |
+| **Doing** | Phase F — clients. Teardown landed; `client`/`tauri`/`react-query` moved v2 to root, v1 to `./legacy`, `./next` gone; React v2 binding written |
+| **Next** | Svelte 5 binding (what Aion ports onto), then extract the shared runtime from the three |
 
 **Phase E (WebSockets) is deliberately after F** — SSE already carries subscriptions, so WS
 is completeness, not a blocker. The client gap is what stops people using this.
@@ -344,10 +344,15 @@ matters:
 - `UndefinedInitialDataOptions`, `DefinedInitialDataOptions`, `UseMutationOptions` and the
   `queryOptions()` helper live in the **framework** packages, not `@tanstack/query-core`.
 
-So the honest split is runtime-vs-types, not file-vs-file. The runtime — the path proxy and
-the `{queryKey, queryFn}` / `{mutationKey, mutationFn}` / `{subscribe, enabled}` objects it
-builds — is fully shareable, because `tanstack.queryOptions()` is effectively identity at
-runtime and exists only for inference. The option *types* have to be supplied per framework.
+So the honest split is runtime-vs-types, not file-vs-file. The option *types* have to be
+supplied per framework.
+
+**And writing the React binding turned up one more difference the type analysis missed:**
+Solid's proxy returns option *thunks* — `queryOptions: () => () => tanstack.queryOptions({…})`
+— because Solid consumes accessors, while React returns the object directly. So even the
+runtime is not identical; a shared layer has to parameterize "wrap or don't wrap" too. That
+is two surprises from assuming Solid generalizes, which is the case for extracting only once
+a second implementation exists rather than designing the abstraction up front.
 
 The split the code is pointing at:
 

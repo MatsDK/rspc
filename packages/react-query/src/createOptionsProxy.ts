@@ -10,8 +10,8 @@ import {
 	createProceduresProxy,
 	traverseClient,
 } from "@rspc/client";
-import * as tanstack from "@tanstack/solid-query";
-import { skipToken } from "@tanstack/solid-query";
+import * as tanstack from "@tanstack/react-query";
+import { skipToken } from "@tanstack/react-query";
 
 interface TypeHelper<P extends Procedure> {
 	"~types": {
@@ -26,23 +26,14 @@ export type RspcQueryOptions<P extends Procedure> = {
 	<TQueryFnData extends P["output"], TData = TQueryFnData>(
 		input: VoidIfInputNull<P> | tanstack.SkipToken,
 		options?: Omit<
-			ReturnType<
-				tanstack.UndefinedInitialDataOptions<
-					TQueryFnData,
-					P["error"],
-					TData,
-					any
-				>
-			>,
+			tanstack.UndefinedInitialDataOptions<TQueryFnData, P["error"], TData, any>,
 			"queryKey" | "queryFn" | "queryHash" | "queryHashFn"
 		>,
 	): tanstack.UndefinedInitialDataOptions<TQueryFnData, P["error"], TData, any>;
 	<TQueryFnData extends P["output"], TData = TQueryFnData>(
 		input: VoidIfInputNull<P> | tanstack.SkipToken,
 		options?: Omit<
-			ReturnType<
-				tanstack.DefinedInitialDataOptions<TQueryFnData, P["error"], TData, any>
-			>,
+			tanstack.DefinedInitialDataOptions<TQueryFnData, P["error"], TData, any>,
 			"queryKey" | "queryFn" | "queryHash" | "queryHashFn"
 		>,
 	): tanstack.DefinedInitialDataOptions<TQueryFnData, P["error"], TData, any>;
@@ -58,9 +49,7 @@ interface QueryMethods<P extends Procedure> extends TypeHelper<P> {
 
 export type RspcMutationOptions<P extends Procedure> = <TCtx = unknown>(
 	options?: Omit<
-		ReturnType<
-			tanstack.UseMutationOptions<P["output"], P["error"], P["input"], TCtx>
-		>,
+		tanstack.UseMutationOptions<P["output"], P["error"], P["input"], TCtx>,
 		"mutationKey" | "mutationFn"
 	>,
 ) => tanstack.UseMutationOptions<P["output"], P["error"], P["input"], TCtx>;
@@ -119,26 +108,25 @@ export function createRSPCOptionsProxy<P extends Procedures>(
 
 		const methods: Record<UtilsMethods, () => unknown> = {
 			queryOptions: () => {
-				return () =>
-					tanstack.queryOptions({
-						...(args[1] ?? {}),
-						queryKey: [path, args[0]],
-						queryFn:
-							args[0] === tanstack.skipToken
-								? args[0]
-								: () => (traverseClient(client, path) as any).query(args[0]),
-					});
+				return tanstack.queryOptions({
+					...(args[1] ?? {}),
+					queryKey: [path, args[0]],
+					queryFn:
+						args[0] === tanstack.skipToken
+							? args[0]
+							: () => (traverseClient(client, path) as any).query(args[0]),
+				});
 			},
 			queryKey: () => {
 				return [path, args[0]];
 			},
 			mutationOptions: () => {
-				return () => ({
+				return {
 					...(args[0] ?? {}),
 					mutationKey: [path],
 					mutationFn: (input: unknown) =>
 						(traverseClient(client, path) as any).mutate(input),
-				});
+				};
 			},
 			mutationKey: () => {
 				return [path];

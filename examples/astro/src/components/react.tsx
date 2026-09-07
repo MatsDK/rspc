@@ -1,5 +1,5 @@
 import { createClient, FetchTransport, WebsocketTransport } from "@rspc/client/legacy";
-import { createReactQueryHooks } from "@rspc/react-query";
+import { createReactQueryHooks } from "@rspc/react-query/legacy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { useState } from "react";
 

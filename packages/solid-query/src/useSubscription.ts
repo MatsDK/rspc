@@ -1,4 +1,4 @@
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { RspcSubscriptionOptions } from "./createOptionsProxy";
 
@@ -24,7 +24,7 @@ export function useSubscription<TOut, TError>(
 			return;
 		}
 
-		options.subscribe({
+		const sub = options.subscribe({
 			onStarted() {
 				options.onStarted?.();
 				setState({
@@ -57,6 +57,8 @@ export function useSubscription<TOut, TError>(
 				}));
 			},
 		});
+
+		onCleanup(() => sub.unsubscribe());
 	});
 
 	return state;
