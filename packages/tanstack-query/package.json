@@ -23,6 +23,7 @@
 		"prepare": "tsup"
 	},
 	"dependencies": {
+		"@rspc/client": "workspace:*",
 		"@tanstack/query-core": "^5.66.0"
 	},
 	"devDependencies": {

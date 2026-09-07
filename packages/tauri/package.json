@@ -14,10 +14,10 @@
 			"import": "./dist/index.js",
 			"default": "./dist/index.cjs"
 		},
-		"./next": {
-			"types": "./dist/next.d.ts",
-			"import": "./dist/next.js",
-			"default": "./dist/next.cjs"
+		"./legacy": {
+			"types": "./dist/legacy/index.d.ts",
+			"import": "./dist/legacy/index.js",
+			"default": "./dist/legacy/index.cjs"
 		}
 	},
 	"types": "dist/index.d.ts",
@@ -28,7 +28,7 @@
 		"prepare": "tsup"
 	},
 	"tsup": {
-		"entry": ["src/index.ts", "src/next.ts"],
+		"entry": ["src/index.ts", "src/legacy/index.ts"],
 		"format": ["esm", "cjs"],
 		"dts": {
 			"resolve": true

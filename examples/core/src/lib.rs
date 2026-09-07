@@ -120,7 +120,7 @@ pub fn mount() -> Router<Ctx> {
                 .query(|_, _: ()| async { Ok(env!("CARGO_PKG_VERSION")) })
         })
         .procedure("newstuffpanic", {
-            <BaseProcedure>::builder().query(|_, _: ()| async move { Ok(todo!()) })
+            <BaseProcedure>::builder().query(|_, _: ()| async move { Ok::<(), Error>(todo!()) })
         })
         .procedure("newstuffser", {
             <BaseProcedure>::builder().query(|_, _: ()| async move { Ok(SerialisationError) })

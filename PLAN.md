@@ -8,7 +8,7 @@ code wins.
 | | |
 | --- | --- |
 | **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
-| **Doing** | Phase F — clients. Teardown landed; `@rspc/client` moved v2 to root |
+| **Doing** | Phase F — clients. Teardown landed; `@rspc/client` and `@rspc/tauri` moved v2 to root, v1 to `./legacy`, `./next` gone |
 | **Next** | React v2 binding, then extract the shared runtime, then Svelte 5 (what Aion ports onto) |
 
 **Phase E (WebSockets) is deliberately after F** — SSE already carries subscriptions, so WS
@@ -457,8 +457,10 @@ So the export map inverts:
 | Subpath                 | Before          | After           |
 | ----------------------- | --------------- | --------------- |
 | `@rspc/client`          | v1              | **v2**          |
-| `@rspc/client/next`     | v2              | deprecated alias for `.`, one release |
+| `@rspc/client/next`     | v2              | **removed**     |
 | `@rspc/client/legacy`   | —               | **v1**          |
+
+`@rspc/tauri` got the same treatment: `./next` → `.`, the v1 `TauriTransport` → `./legacy`.
 
 **Rust** — same move: `integrations/axum/src/next.rs` becomes the crate's main endpoint
 module, and the JSON-RPC/WebSocket path (`endpoint.rs`, `jsonrpc.rs`, `jsonrpc_exec.rs`)
@@ -471,13 +473,13 @@ under a new package name at a fresh `0.1.0`, nothing changes under anyone silent
 migration guide can state the mapping in one table. Doing it later, after people have
 depended on the new package, would cost a major version for no benefit.
 
-Keep `./next` as a deprecated alias for one release so existing imports don't break in the
-same commit that moves the files. Aion, the current main consumer, imports
-`@rspc/client/next` and becomes a one-line change.
+**No deprecated `./next` alias.** It only ever existed in upstream's unreleased state and in
+this fork, so there is no installed base to keep compatible — carrying it into a fresh
+`0.1.0` would be shipping cruft on day one. Every in-repo importer and Aion were repointed in
+the same change.
 
-**Sequencing:** do the move in Phase G, after the v2 client is actually finished (Phase F) —
-moving files while their contents are still changing makes every diff unreadable. But decide
-it now, because Phase H's docs must be written against the final layout, not the current one.
+**Done, ahead of Phase G.** Moving first means the remaining Phase F work (React, Svelte 5)
+gets written at final paths instead of being moved afterwards.
 
 ---
 
@@ -657,9 +659,10 @@ Deliberately small, because most of what looked like dead code is compat surface
    - `binario` — blocked upstream on non-`Send` futures. Park with a written reason; do not
      land the `todo!()` stub currently in the working tree.
    - `devtools`, `openapi`, `client` — finish or delete.
-3. **Move v2 to the root and demote v1 to `legacy/`**, per the target layout in §2. Do this
-   as a pure file move plus export-map change in its own commit — no behaviour changes mixed
-   in, so the diff stays reviewable. Land the deprecated `./next` alias in the same commit.
+3. ~~**Move v2 to the root and demote v1 to `legacy/`**~~ — **done early**, in Phase F, so the
+   remaining client work lands at final paths. Covers `@rspc/client` and `@rspc/tauri`.
+   Still to do here: the Rust half — `integrations/axum/src/next.rs` → the crate's main
+   endpoint module, JSON-RPC/WebSocket under `legacy/`.
 4. **Clean the build outputs** — gitignore `dist/` and build on publish, or regenerate in CI.
 
 **Exit:** every file is reachable from a public entry point, a test, or an example, and the

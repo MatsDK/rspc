@@ -1,6 +1,6 @@
 {
 	"compilerOptions": {
-		"moduleResolution": "node",
+		"moduleResolution": "bundler",
 		"lib": ["ESNext", "DOM"],
 		"strict": true,
 		"target": "ESNext",
@@ -9,11 +9,16 @@
 		"emitDeclarationOnly": true,
 		"declarationMap": true,
 		"paths": {
+			"@rspc/client": ["./client/src/index.ts"],
+			"@rspc/client/legacy": ["./client/src/legacy/index.ts"],
 			"@rspc/client/*": ["./client/src/*"],
+			"@rspc/query-core": ["./query-core/src/index.ts"],
 			"@rspc/query-core/*": ["./query-core/src/*"],
 			"@rspc/react-query/*": ["./react-query/src/*"],
 			"@rspc/solid-query/*": ["./solid-query/src/*"],
 			"@rspc/svelte-query/*": ["./svelte-query/src/*"],
+			"@rspc/tauri": ["./tauri/src/index.ts"],
+			"@rspc/tauri/legacy": ["./tauri/src/legacy/index.ts"],
 			"@rspc/tauri/*": ["./tauri/src/*"]
 		}
 	}

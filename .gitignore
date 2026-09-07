@@ -24,3 +24,7 @@ node_modules
 .svelte-kit
 .astro/
 .turbo
+
+# tsc --emitDeclarationOnly output when run outside tsup
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map

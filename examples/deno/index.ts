@@ -1,4 +1,4 @@
-import { createClient, fetchExecute, sseExecute } from "@rspc/client/next";
+import { createClient, fetchExecute, sseExecute } from "@rspc/client";
 import { Procedures } from "../bindings.ts";
 
 const url = "http://[::]:4000/rspc";

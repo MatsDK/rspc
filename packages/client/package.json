@@ -15,11 +15,6 @@
 			"import": "./dist/index.js",
 			"default": "./dist/index.cjs"
 		},
-		"./next": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"default": "./dist/index.cjs"
-		},
 		"./legacy": {
 			"types": "./dist/legacy/index.d.ts",
 			"import": "./dist/legacy/index.js",

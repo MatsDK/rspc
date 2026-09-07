@@ -1,49 +1,45 @@
-import type { OperationType, Transport } from "@rspc/client/legacy";
-import type { ProcedureKind } from "@rspc/client";
+import {
+	type ExecuteArgs,
+	type ExecuteFn,
+	observable,
+} from "@rspc/client";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
-import { tauriExecute } from "./next";
+type Request = { request: { path: string; input: any } } | { abort: number };
 
-export class TauriTransport implements Transport {
-	clientSubscriptionCallback?: (id: string, value: any) => void;
+type Response<T> = { code: number; value: T } | null;
 
-	id = 0;
-
-	async doRequest(
-		operation: OperationType,
-		key: string,
-		data: any,
-	): Promise<any> {
-		return await new Promise((resolve, reject) => {
-			if (operation === "subscription") resolve(undefined);
-
-			let input;
-			if (operation === "subscription") {
-				input = data[1];
-			} else {
-				input = data;
-			}
-
-			const obs = tauriExecute({
-				type: operation as ProcedureKind,
-				path: key,
-				input,
-			});
-
-			obs.subscribe({
-				next: (value) => {
-					if (operation === "subscription") {
-						if (value.type === "data")
-							this.clientSubscriptionCallback?.(data[0], value.value);
-					} else {
-						if (value.type === "data") {
-							resolve(value.value);
-						}
-					}
-				},
-				error(error) {
-					reject(error);
-				},
-			});
-		});
-	}
+export async function handleRpc(req: Request, channel: Channel<Response<any>>) {
+	await invoke("plugin:rspc|handle_rpc", { req, channel });
 }
+
+export const tauriExecute: ExecuteFn = (args: ExecuteArgs) => {
+	return observable((subscriber) => {
+		const channel = new Channel<Response<any>>();
+
+		channel.onmessage = (response) => {
+			if (response === null) {
+				subscriber.complete();
+				return;
+			}
+			if (response.code === 200) {
+				subscriber.next({ type: "data", value: response.value });
+			} else {
+				subscriber.error(response.value);
+			}
+		};
+
+		handleRpc(
+			{ request: { path: args.path, input: args.input ?? null } },
+			channel,
+		)
+			.then(() => {
+				if (args.type === "subscription") {
+					subscriber.next({ type: "started" });
+				}
+			})
+			.catch(() => {
+				subscriber.complete();
+			});
+	});
+};
