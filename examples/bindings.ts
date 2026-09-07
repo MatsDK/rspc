@@ -3,10 +3,10 @@
 
 export type Error = { type: "Mistake"; error: string } | { type: "Validator"; error: any } | { type: "Authorization"; error: string }
 
-export type ProceduresLegacy = { queries: { key: "cached"; input: null; result: number } | { key: "flush"; input: null; result: string } | { key: "flush2"; input: null; result: string } | { key: "newstuff2"; input: null; result: string } | { key: "newstuffpanic"; input: null; result: null } | { key: "newstuffser"; input: null; result: null } | { key: "sfmPost"; input: [string, null]; result: string } | { key: "streamInStreamInStreamInStream"; input: null; result: number[] } | { key: "validator"; input: { mail: string }; result: null } | { key: "version"; input: null; result: string } | { key: "withoutBaseProcedure"; input: string; result: null }; mutations: { key: "sendMsg"; input: string; result: string }; subscriptions: { key: "basicSubscription"; input: null; result: number[] } }
+export type ProceduresLegacy = { queries: { key: "cached"; input: null; result: number } | { key: "flush"; input: null; result: string } | { key: "flush2"; input: null; result: string } | { key: "newstuff2"; input: null; result: string } | { key: "newstuffpanic"; input: null; result: null } | { key: "newstuffser"; input: null; result: null } | { key: "sfmPost"; input: [string, null]; result: string } | { key: "streamInStreamInStreamInStream"; input: null; result: number[] } | { key: "validator"; input: { mail: string }; result: null } | { key: "version"; input: null; result: string } | { key: "withoutBaseProcedure"; input: string; result: null }; mutations: { key: "sendMsg"; input: string; result: string }; subscriptions: { key: "basicSubscription"; input: null; result: number } }
 
 export type Procedures = {
-	basicSubscription: { kind: "subscription", input: null, output: number[], error: Error },
+	basicSubscription: { kind: "subscription", input: null, output: number, error: Error },
 	cached: { kind: "query", input: null, output: number, error: Error },
 	flush: { kind: "query", input: null, output: string, error: Error },
 	flush2: { kind: "query", input: null, output: string, error: Error },

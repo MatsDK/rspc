@@ -24,7 +24,7 @@
 	},
 	"dependencies": {
 		"@rspc/client": "workspace:*",
-		"@tanstack/query-core": "^5.66.0"
+		"@tanstack/query-core": "^5.79.0"
 	},
 	"devDependencies": {
 		"tsup": "^8.3.6",

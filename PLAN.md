@@ -17,6 +17,12 @@ subscription teardown holds, since without it every mount would leak an SSE conn
 That example was previously commented out of `index.astro` and calling procedures
 (`transformMe`, `echo`, `pings`) that no longer exist in the generated bindings.
 
+**Build fix:** `@rspc/react-query` failed to build on a pre-existing TanStack version skew,
+not on the v2 code — `@rspc/query-core` resolved `@tanstack/query-core` to 5.79 (where
+`onMutate` takes `(variables, context)`) while `@rspc/react-query` pinned `^5.66.0` (one
+argument), and the v1 helper hands options from one to the other. Every `@tanstack/*` pin
+across packages and examples is now `^5.79.0`. Needs `pnpm install` to take effect.
+
 **Phase E (WebSockets) is deliberately after F** — SSE already carries subscriptions, so WS
 is completeness, not a blocker. The client gap is what stops people using this.
 
@@ -611,10 +617,26 @@ this is a port, not a rewrite.
    subscriptions), SSE (server→client only, ~6 connections per origin, no custom headers),
    WebSocket (bidirectional, reconnect complexity), Tauri IPC. Users currently have no way to
    choose.
-6. **Test the batch executor** — `batch_query` is a commented-out stub, and batching is the
-   most intricate untested code in the repo.
+6. **Finish batching and streaming.** These are referenced all over this document but were
+   never one workstream, which is how they ended up half-built on both sides. Four modes are
+   advertised by `fetchExecute.ts:14-26`; only three exist:
 
-**Exit:** every transport in §1.1 is either ✅ or explicitly out of scope in the docs.
+   | Mode | State | Owed |
+   | --- | --- | --- |
+   | `batch: false, stream: false` | ✅ | — |
+   | `batch: true,  stream: false` | 🟡 | Server untested (`batch_query` is a commented-out stub at the end of `next.rs`) |
+   | `batch: false, stream: true`  | ❌ | Not implemented — the non-batch branch never reads `config.stream`. Build it or delete the option |
+   | `batch: true,  stream: true`  | 🟡 | The `\d+:[…]\n` line protocol works but is undocumented and untested end to end |
+
+   Concretely: test the server executor; make the batch loader per-client rather than
+   module-global and reject queued callers when the batch throws (§1.4 — today they hang
+   forever); decide the missing mode; write the wire format down (Phase H.7), since it exists
+   only as a regex in one file and a formatter in another; and add a round-trip test per mode
+   (Phase I.4). Streaming a query via `rspc::Stream` is the server half of the same story and
+   is what `D-4` is about.
+
+**Exit:** every transport in §1.1 is either ✅ or explicitly out of scope in the docs, and
+every batch/stream mode either works and is tested, or no longer appears in the config type.
 
 ### Phase F — Complete the client story (L)
 
