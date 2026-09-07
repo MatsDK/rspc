@@ -8,80 +8,27 @@ code wins.
 | | |
 | --- | --- |
 | **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
-| **Doing** | Phase F — clients. Teardown landed; `client`/`tauri`/`react-query` moved v2 to root, v1 to `./legacy`, `./next` gone; React v2 binding written |
-| **Next** | Extract the shared runtime, now that Solid, React and Svelte all exist to extract *from* |
+| **State** | Core is sound, all three framework clients are on v2, CI green across the feature matrix |
+| **Next** | The two remaining reachable panics, then real `meta.name()` — which unblocks `cache` and `invalidation` |
 
-CI exists (`.github/workflows/ci.yml`) and the whole feature matrix is green. Writing it
-immediately found a real bug: `rspc --features legacy` did **not** compile standalone —
-`crates/legacy` declared `serde = { workspace = true }` against a workspace default of
-`default-features = false`, so serde's `Content`/`ContentVisitor` were configured out and
-`#[serde(untagged)]` failed with 16 errors. It only ever built because something else in a
-workspace build turned those features on. Any external consumer enabling the migration
-bridge would have hit it. Fixed with `features = ["derive", "std"]`.
+**What still stands between this and a working library.** Docs and publishing are out of
+scope here — the docs site is its own repo, and releasing is gated on the naming decision
+(§2) rather than on code.
 
-All three framework bindings are on v2 and `pnpm build` + `pnpm typecheck` are both green
-for the first time. Svelte's `useSubscription` returns a `readable` store, so teardown runs
-when the last subscriber goes away — no `onDestroy` at the call site.
+1. `integrations/axum/src/next.rs:508` — a panicking procedure still `panic!()`s the request
+   task. `examples/core`'s `newstuffpanic` demonstrates it.
+2. `crates/procedure/src/stream.rs:466` — `todo!()` when a value fails to serialise
+   mid-stream.
+3. `rspc/src/procedure.rs:80,93` — `meta.name()` is the literal `"todo"`. This makes
+   `crates/cache` **actively wrong** (its key is also `"todo"`, so every cached procedure
+   shares one slot) and forces `crates/invalidation` to hardcode `"sfmPost"`.
+4. `flush()` is a public no-op — finish the backpressure mechanism or delete the function.
+5. `batch: false, stream: true` is advertised in the client config type and unimplemented.
 
-**The build/typecheck failures were all one root cause:** three `@tanstack/query-core`
-instances (5.66, 5.79, 5.90) resolving from `^` ranges. Symptoms were an `onMutate` arity
-mismatch in v1 react-query, a TS2742 portability error in v1 query-core, and svelte-query
-silently emitting no `.d.ts` at all. Every `@tanstack/*` dep is now pinned exactly to
-`5.79.0`, giving a single instance. The v1 packages additionally have declaration emit off
-in their tsconfig — `tsc` cannot name a type that lives in one of query-core's internal
-chunk files, while tsup's dts rollup can, so the published types are unaffected.
-
-React is at parity with Solid: options proxy, `useSubscription`, `infer*` helpers, and a
-worked example in `examples/astro` that runs under `StrictMode` — which is the check that
-subscription teardown holds, since without it every mount would leak an SSE connection.
-That example was previously commented out of `index.astro` and calling procedures
-(`transformMe`, `echo`, `pings`) that no longer exist in the generated bindings.
-
-**Build fix:** `@rspc/react-query` failed to build on a pre-existing TanStack version skew,
-not on the v2 code — `@rspc/query-core` resolved `@tanstack/query-core` to 5.79 (where
-`onMutate` takes `(variables, context)`) while `@rspc/react-query` pinned `^5.66.0` (one
-argument), and the v1 helper hands options from one to the other. Every `@tanstack/*` pin
-across packages and examples is now `^5.79.0`. Needs `pnpm install` to take effect.
-
-**Phase E (WebSockets) is deliberately after F** — SSE already carries subscriptions, so WS
-is completeness, not a blocker. The client gap is what stops people using this.
-
-⚠️ **Nothing in Phase F is typechecked.** `tsc`/`pnpm build` are off-limits in this
-workspace, so every TS change here needs `pnpm --filter @rspc/client build` + `pnpm
-typecheck` run by hand before it can be trusted.
-
-**Done** (`6607673`, `30eadcf`, `1140a84`):
-
-- A.1, A.2 — legacy restored as opt-in, workspace resolves, `PLAN.md` added.
-- B.1 — `procedure.rs` returns deserialization errors instead of `.unwrap()`ing them.
-- B.2 — `poll_inner` carries the error so `Inner::Value` yields instead of hitting `todo!()`.
-  These two together were the double-panic.
-- B.5 — `Debug` for `ProcedureStream`, `DynInput`, `DynOutput`.
-- B.6 — `State::get_mut` took `&self` and returned `&T`.
-- D.1 — subscriptions export `T`; `rspc::Stream` in a query still exports `Vec<T>`, via a
-  defaulted `ResolverOutput::item_data_type`. Breaking for generated bindings: consumers
-  unwrapping by hand must drop that workaround in the same change (Aion's
-  `UnwrapSubscriptions` was deleted alongside).
-
-- B.7, B.8 — one error envelope. Every framework error now carries `~rspc: true`; user
-  errors stay bare, so that flag is the discriminator. `ProcedureError::NotFound` is
-  constructed at both routing sites and serialized through the core's own impl, and the
-  `unimplemented!()` arms for `NotFound`/`Downcast` return responses instead of panicking.
-
-**Deferred, and why:** C.1 (`meta.name()` returns `"todo"`) only matters because `cache` and
-`invalidation` are built on it — both are extras, so it moves to Phase G with them.
-B.4 (`todo!()` on map failure) needs `ProcedureStreamMap`'s `Item` to become
-`Result<T, String>`; park it until the transport work says what it needs.
-
-**Order agreed:** core correctness → core completeness → type export → transports → clients
-→ extras. Anything that changes a contract clients depend on (error envelope, subscription
-types, wire format) lands before the clients do.
-
-**Verified with** `cargo check -p rspc-procedure` and `-p rspc --features typescript`.
-
-Tests are deferred for now — they come back in Phase I, once the API has stopped moving.
-
-Done: Phase A.1, A.2 (`6607673`).
+**Verified green:** `cargo check --workspace`; the feature matrix (`legacy` on/off, `ws`
+on/off, `--no-default-features`); `pnpm build`; `pnpm typecheck`.
+**Not verified:** `cargo test --workspace`, which CI runs — `cargo test` is off-limits in
+this workspace and an axum assertion changed (`__rspc` → `~rspc`).
 
 ## Why this document exists
 
@@ -122,9 +69,10 @@ housekeeping:
 - Upstream deliberately made it a default feature (`72336dc "bring back legacy feature but
   make it default"`).
 
-**The in-flight working-tree change deleting `crates/legacy` should not land.** It is the
-right call for a private consumer that never used v1 syntax; it is the wrong call for the
-library, because it deletes the only bridge our inherited users have. See Phase A.
+**Settled:** an in-flight change deleting `crates/legacy` was reverted. It was the right
+call for a private consumer that never used v1 syntax and the wrong one for the library,
+which would have lost the only bridge its inherited users have. `legacy` is now an opt-in
+feature rather than a default.
 
 The same logic applies to the v1 client and the JSON-RPC/WebSocket transport: they are not
 dead weight to be cleared away, they are the compatibility surface.
@@ -153,13 +101,13 @@ not what it intends.
 | Error mapping across layers           | ❌    | One `TError` is fixed for the whole chain; a middleware cannot convert error types            |
 | Procedure metadata (`meta.name()`)    | ❌    | Always returns the literal string `"todo"` (`rspc/src/procedure.rs:80,93`)                    |
 | Backpressure / manual flush           | ❌    | `flush()` is a public no-op: `CAN_FLUSH` is never set true, `SHOULD_FLUSH` never read (`crates/procedure/src/stream.rs:17-37`) |
-| Typed error → wire                    | 🟡    | Works, but asymmetric — user errors serialize bare while framework errors get a `{"~rspc":…}` envelope, so clients can't reliably discriminate (`crates/procedure/src/error.rs:99-114`) |
+| Typed error → wire                    | ✅    | Framework errors all carry `~rspc: true`; user errors stay bare, so that flag discriminates |
 
 **Server — type export**
 
 | Target                 | State | Evidence                                                                                           |
 | ---------------------- | ----- | ---------------------------------------------------------------------------------------------------- |
-| TypeScript (v2)        | 🟡    | Works, but subscriptions export the wrong type (§1.2b) and every `DataType`→string conversion is an `.unwrap()` (`languages/typescript.rs:203,211,219`) |
+| TypeScript (v2)        | 🟡    | Correct for all three kinds; every `DataType`→string conversion is still an `.unwrap()` (`languages/typescript.rs:203,211,219`) |
 | TypeScript (v1 shape)  | ✅    | `ProceduresLegacy` emission, `#[cfg(feature = "legacy")]` at `typescript.rs:67-82`. Part of the compat surface |
 | TypeScript source maps | 🟡    | Behind a flag that prints "unstable feature" at runtime                                              |
 | Rust                   | ❌    | `languages/rust.rs` is `//! TODO: Bring this back when published.` plus ~85 commented-out lines. Enabling the `rust` feature compiles an empty module |
@@ -172,7 +120,7 @@ not what it intends.
 | HTTP single (v2)         | ✅    | `integrations/axum/src/next.rs`                                                                          |
 | HTTP batch (v2)          | 🟡    | Implemented, **untested** — `batch_query` is a commented-out stub at the end of `next.rs`                  |
 | HTTP batch + streaming   | 🟡    | Custom `\d+:[…]\n` line protocol, undocumented and untested                                               |
-| SSE subscriptions (v2)   | 🟡    | Works; no teardown, no reconnect policy (§1.4)                                                            |
+| SSE subscriptions (v2)   | ✅    | Teardown and browser-managed reconnect. No resume: a reconnect restarts the subscription, so servers should emit initial state on subscribe |
 | **WebSocket**            | 🟡    | **Implemented and v2-shaped, but not compiled in.** `endpoint.rs:41-61,204-309` has the upgrade + `handle_websocket`, and imports `rspc_procedure::{Procedure, Procedures}` — the v2 runtime types. Blocked only by `// mod endpoint;` at `lib.rs:9`, plus axum-0.7 path syntax (`"/:id"`, `endpoint.rs:33`) vs 0.8's `"/{id}"` |
 | JSON-RPC wire format     | 🟡    | `jsonrpc.rs` + `jsonrpc_exec.rs`, compiled but currently unreachable. The wire format v1 clients speak    |
 | Tauri IPC                | ✅    | `integrations/tauri` — the most complete integration in the repo, including abort support (`lib.rs:131-135`) |
@@ -182,10 +130,10 @@ not what it intends.
 | Package                | Targets | State | Notes                                                                                  |
 | ---------------------- | ------- | ----- | ---------------------------------------------------------------------------------------- |
 | `@rspc/client` (root)  | v1      | ✅    | `Transport` class with `FetchTransport` + `WebsocketTransport` (`transport.ts:76-132`), incl. reconnect. **Compat surface — keep** |
-| `@rspc/client/next`    | v2      | 🟡    | The v2 client. No unsubscribe, no abort, no WS executor (§1.4)                            |
+| `@rspc/client` (v2)    | v2      | 🟡    | Unsubscribe and abort landed; still no WS executor, and the batch loader is module-global (§1.4) |
 | `@rspc/solid-query`    | v2      | ✅    | The only framework binding ported — and the reference architecture (§1.8)                 |
-| `@rspc/react-query`    | v1      | 🟡    | Works on v1; needs a v2 port alongside                                                    |
-| `@rspc/svelte-query`   | v1      | ❌    | Needs a v2 port, **and** `peerDependencies.svelte` is `">=3 <5"` — Svelte 5 users cannot install it at all |
+| `@rspc/react-query`    | v2      | ✅    | Options proxy + `useSubscription`; v1 at `./legacy`                                       |
+| `@rspc/svelte-query`   | v2      | ✅    | `useSubscription` is a `readable`, so teardown is automatic; peer range now `^4 \|\| ^5` |
 | `@rspc/query-core`     | v1      | 🟡    | Shared helpers for the **v1** bindings                                                    |
 | `@rspc/tanstack-query` | —       | ❌    | Currently a byte-identical stale copy of `query-core`, imported by nothing. **The name is right and the slot is needed** — this should become the shared **v2** layer (§1.8) |
 | `@rspc/tauri`          | both    | ✅    | v1 entrypoint wraps the v2 executor — the one place they're bridged cleanly               |
@@ -206,7 +154,7 @@ not what it intends.
 | `client`       | ❌    | See above                                                                                                  |
 | `legacy`       | ✅    | **The v1 compat layer.** Being deleted in the working tree — see §1.3                                     |
 
-### 1.2 Correctness bugs
+### 1.2 Correctness bugs (a) and (b) are fixed; kept as the record of what was wrong
 
 **(a) Malformed input double-panics the server.** The chain, fully traced:
 
@@ -279,7 +227,10 @@ change can look complete and still break the graph. CI building **across the fea
 
 ### 1.4 Client-side gaps (v2 client)
 
-**Subscriptions can never be torn down.** `client.ts:27-30` declares
+**Fixed since:** subscriptions can now be torn down, and `sseExecute` closes the
+`EventSource` while letting the browser reconnect. The batch loader below is still open.
+
+**Subscriptions can never be torn down.** *(fixed)* `client.ts:27-30` declares
 `subscribe: (…) => Unsubscribable`, but `UntypedClient.subscription()` has no `return`
 statement, and neither does `observable.ts`'s `subscribe()` — the callback signature
 `(observer) => void` never captures a teardown function. `grep -rn "unsubscribe"
@@ -338,7 +289,7 @@ There is effectively none for v2.
 - **`specta` is pinned to `=2.0.0-rc.22`** — an exact pre-1.0 release candidate that the
   entire type-generation story rests on. A genuine blocker for claiming stability.
 
-### 1.7 Genuinely dead code
+### 1.7 Genuinely dead code (still present)
 
 Narrower than it looks, once WS and legacy are kept:
 
@@ -532,52 +483,30 @@ Phase H.
 Ten phases. Each leaves the tree in a working state and has an **exit criterion** — something
 checkable, not a feeling. Sizes are S/M/L.
 
-### Phase A — Decide on compat, unbreak the build, add CI (S)
+### Phase A — Build and CI ✅ done
 
-Nothing below is verifiable until `cargo` resolves, so this goes first, and CI lands with it
-so nothing silently rots again.
+Legacy restored as an opt-in feature, workspace resolves, dead files removed, CI added
+covering the feature matrix. `examples/legacy` and `crates/binario` are parked via
+`exclude` with a `continue-on-error` CI job so they fail loudly rather than rot.
 
-1. ~~**Decide `D-1`: does v1 compat stay?**~~ **Done — yes.** See §"The governing constraint".
-2. ~~**Revert the `crates/legacy` deletion**, restore the `legacy` feature, park what cannot
-   compile.~~ **Done** — see §1.3 for exactly what was restored, what became opt-in, and what
-   was excluded.
-3. Delete the genuinely dead files from §1.7 (`request.rs`, `rspc/src/mod.rs`) — neither is
-   compat surface. Leave `packages/tanstack-query` in place; it gets repurposed in Phase F.
-4. Add `.github/workflows/ci.yml`: `cargo check --workspace`, `cargo test --workspace`,
-   `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`, `pnpm typecheck`. Build
-   with **and without** the `legacy` and `ws` features — feature-gated code that nobody
-   compiles is how this repo got here.
-5. Fill in `dependabot.yml`'s unconfigured Rust and npm ecosystems.
-6. Add a CI job (or a `cargo check` line) for each **parked** member, so `examples/legacy`
-   and `binario` fail loudly when their blocker is lifted rather than silently rotting.
+### Phase B — Correctness (S, mostly done)
 
-**Exit:** CI green on a clean checkout, across the feature matrix.
+Done: deserialization errors propagate instead of `.unwrap()`ing; `poll_inner` yields the
+error rather than hitting `todo!()` (those two were the double-panic); `Debug` for
+`ProcedureStream`/`DynInput`/`DynOutput`; `State::get_mut` actually mutable;
+`ProcedureError::NotFound` constructed and the `unimplemented!()` arms answered; one error
+envelope (`~rspc: true` on framework errors, user errors bare).
 
-### Phase B — Correctness (M)
+Left:
 
-The bugs that make the library unsafe in front of untrusted input.
+1. **`integrations/axum/src/next.rs:508`** — `ProcedureError::Unwind(err) => panic!()`. A
+   panicking procedure still takes down the request task; it should be a 500 carrying
+   `err.message()` (`"resolver panic"`), which does not leak the payload.
+2. **`crates/procedure/src/stream.rs:466`** — `todo!()` when the map closure fails.
+   `ProcedureStreamMap`'s `Stream::Item` is `T`, so there is no channel for the error;
+   this needs `Item` to become `Result<T, _>`.
 
-1. **`procedure.rs:101`** — propagate instead of `.unwrap()`. `From<ProcedureError> for
-   ProcedureStream` already exists, so this is a `match` with an early `return e.into()`.
-2. **`stream.rs:385`** — implement the `Inner::Value` arm (`Poll::Ready(v.take().map(Err))`).
-   This makes the `unreachable!()`s at `:401` and `:412` genuinely reachable; handle them in
-   the same change rather than leaving a latent trap.
-3. **Test the 400 path.** With 1 and 2, `next.rs:490-493` becomes reachable for the first
-   time. Highest-value new test in the plan.
-4. **`stream.rs:463`** — return a real error on map failure; resolves the open question at
-   `:459-460` about surfacing serialization errors.
-5. **Implement the three `Debug` impls** — `finish_non_exhaustive()` is fine; anything but a
-   panic.
-6. **Fix `State::get_mut`** to actually return `&mut T`.
-7. **Resolve `ProcedureError::NotFound`** — construct it in the integrations, or delete the
-   variant and its `unimplemented!()` arms.
-8. **Settle the error envelope.** Decide whether user errors carry a discriminator so clients
-   can distinguish a typed application error from a framework error, and document the wire
-   shape. An API decision, not a cleanup — and it must stay compatible with what v1 clients
-   expect over JSON-RPC.
-
-**Exit:** no `todo!()`/`unimplemented!()` reachable from a request; clippy passes with the
-`todo`/`panic` lints on.
+**Exit:** no `todo!()`/`unimplemented!()`/`panic!()` reachable from a request.
 
 ### Phase C — Complete the server surface (L)
 
@@ -603,9 +532,10 @@ The bugs that make the library unsafe in front of untrusted input.
 
 ### Phase D — Complete the type-export story (M)
 
-1. **Fix the subscription output type** (§1.2b) — kind-aware, so `subscription` exports `T`
-   while `rspc::Stream`-in-a-query keeps exporting `Vec<T>`.
-2. **Restore `rspc/tests/typescript.rs`** — uncomment, repair, add a subscription case, and
+Done: subscriptions export `T` while `rspc::Stream`-in-a-query still exports `Vec<T>`, via a
+defaulted `ResolverOutput::item_data_type`.
+
+1. **Restore `rspc/tests/typescript.rs`** — uncomment, repair, add a subscription case, and
    cover the `ProceduresLegacy` output too so the compat bindings don't silently regress.
 3. **Replace export-path `.unwrap()`s** (`typescript.rs:203,211,219`, plus the source-map
    writer) with real errors. Export usually runs in a build script; panicking there is a
@@ -658,51 +588,29 @@ this is a port, not a rewrite.
 **Exit:** every transport in §1.1 is either ✅ or explicitly out of scope in the docs, and
 every batch/stream mode either works and is tested, or no longer appears in the config type.
 
-### Phase F — Complete the client story (L)
+### Phase F — Complete the client story (M, mostly done)
 
-The largest phase, and where "all clients" lives.
+Done: teardown throughout (`observable` takes a teardown, `UntypedClient.subscription`
+returns the handle, `sseExecute` closes and lets the browser reconnect, non-batch
+`fetchExecute` aborts); v2 promoted to each package root with v1 at `./legacy` and `./next`
+removed; v2 bindings for React and Svelte 5 alongside Solid; a worked React example under
+`StrictMode`.
 
-1. **Fix the v2 core client** (`packages/client/src/next`):
-   - Give `observable` a teardown contract — `(observer) => (() => void) | void`, with
-     `subscribe()` returning `{ unsubscribe }`. Everything else depends on this.
-   - `UntypedClient.subscription()` returns the handle, making the declared type honest.
-   - `sseExecute` returns a teardown that closes the `EventSource`, closes it on `onerror`
-     too, and has a documented reconnect policy.
-   - `fetchExecute`: key batch loaders per client instance, not per module; wrap the timer
-     body so failures reject every queued caller instead of hanging them; thread an
-     `AbortController` through every request.
-   - Implement or explicitly reject the `batch: false, stream: true` mode its own comment says
-     is "not implemented yet".
-   - Document the batch wire protocol (`\d+:[…]\n`), which currently exists only as a regex in
-     one file and a formatter in another.
-2. **Unify type inference helpers.** `inferInput`/`inferOutput`/`inferError` exist **only
-   inside `@rspc/solid-query`** and operate on options-proxy objects, while v1's
-   `inferQueryResult<TProcedures, K>` lives in `client/src/typescript.ts` with an incompatible
-   two-argument signature. Promote one set into `@rspc/client` so every binding shares it, and
-   keep the v1 names working.
-3. **Extract the shared v2 layer first, then port the bindings** (§1.8). Doing this in the
-   other order means writing the options proxy three more times and then merging them back.
-   - **`@rspc/tanstack-query` becomes the shared, framework-agnostic v2 package.** Move
-     `createRSPCOptionsProxy`, the procedure-path proxy and `inferInput`/`inferOutput`/
-     `inferError` out of `solid-query/src/createOptionsProxy.ts` (~180 of its 255 lines), and
-     re-point its one framework import from `@tanstack/solid-query` to `@tanstack/query-core`.
-   - **`@rspc/solid-query` shrinks** to `useSubscription` plus re-exports — proving the split
-     against the one binding already known to work, before porting anything.
-   - **`@rspc/react-query`** — v2 path: a `useSubscription` on `useEffect` +
-     `useSyncExternalStore`, over the shared proxy.
-   - **`@rspc/svelte-query`** — v2 path: a `$effect`-based subscription hook, **and** bump
-     `peerDependencies.svelte` from `">=3 <5"` and move off Svelte-4 `export let` to runes.
-     Svelte 5 users currently cannot install this package at all.
-   - **`@rspc/query-core`** stays as the **v1** shared layer, so the v1 bindings keep working.
-   - Decide whether Vue/Angular bindings are in scope, or explicitly out (`D-6`). With the
-     shared layer extracted, each is roughly a subscription hook.
-4. **Decide the Rust client's fate** (`D-3`). It cannot talk to the v2 HTTP transport, though
-   it would work against the JSON-RPC one. Rewrite against the v2 wire format, re-point it at
-   the JSON-RPC transport, or delete it — but do not leave a broken client in the repo.
-5. **Keep the v1 client documented and tested**, not merely present. It is the compat surface;
-   if it breaks silently, migration breaks silently.
+Left:
 
-**Exit:** every framework has a v2 binding; every v1 binding still works and says so.
+1. **Extract the shared runtime** (§1.8). Three bindings now exist to extract *from*, and
+   three real divergences to design around rather than guess at: Solid's accessor
+   `ReturnType<>` wrapping, Solid returning option *thunks* where React/Svelte return
+   objects, and Svelte naming it `CreateMutationOptions` vs React's `UseMutationOptions`.
+   `@rspc/tanstack-query` is the slot for it.
+2. **`fetchExecute`'s batch loader is still module-global** — keyed by `"query"`/`"mutation"`
+   rather than per client, and a throw inside the `setTimeout` leaves every queued caller
+   hanging forever.
+3. **Unify the `infer*` helpers** — each binding currently ships its own copy.
+4. **Decide the Rust client's fate** (`D-3`). It still expects the JSON-RPC envelope, so it
+   cannot talk to the v2 HTTP transport.
+
+**Exit:** one shared runtime, three thin bindings, no duplicated proxy logic.
 
 ### Phase G — Clean up (S)
 
