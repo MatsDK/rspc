@@ -44,8 +44,8 @@ where
             let meta = next.meta();
             let cache = meta.state().get::<CacheState>().unwrap(); // TODO: Error handling
 
-            let key = "todo"; // TODO: Work this out properly
-                              // TODO: Keyed to `TInput`
+            // TODO: Also key on `TInput`, so calls with different arguments don't collide.
+            let key = meta.name();
 
             if let Some(value) = cache.store().get(key) {
                 let value: &TResult = value.downcast_ref().unwrap(); // TODO: Error

@@ -1,15 +1,18 @@
-use std::{panic::Location, sync::Arc};
+use std::{borrow::Cow, panic::Location, sync::Arc};
 
 use specta::TypeCollection;
 
 use crate::{procedure::ProcedureType, ProcedureKind, State};
 
 pub struct ErasedProcedure<TCtx> {
-    pub(crate) setup: Vec<Box<dyn FnOnce(&mut State) + 'static>>,
+    // Both take the procedure's key, which only the router knows, so `ProcedureMeta::name`
+    // reports the real path rather than a placeholder.
+    pub(crate) setup: Vec<Box<dyn FnOnce(&mut State, Cow<'static, str>) + 'static>>,
     pub(crate) location: Location<'static>,
     pub(crate) kind: ProcedureKind,
     pub(crate) inner: Box<
         dyn FnOnce(
+            Cow<'static, str>,
             Arc<State>,
             &mut TypeCollection,
         ) -> (rspc_procedure::Procedure<TCtx>, ProcedureType),

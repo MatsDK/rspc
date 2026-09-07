@@ -9,18 +9,14 @@ code wins.
 | --- | --- |
 | **Branch** | `feat/v2-framework-clients` off `3dfc6ee` |
 | **State** | Core is sound, all three framework clients are on v2, CI green across the feature matrix |
-| **Next** | Real `meta.name()` — which unblocks `cache` and `invalidation` (SFM) |
+| **Next** | `flush()` — finish the backpressure mechanism or delete the public no-op |
 
 **What still stands between this and a working library.** Docs and publishing are out of
 scope here — the docs site is its own repo, and releasing is gated on the naming decision
 (§2) rather than on code.
 
-1. `rspc/src/procedure.rs:80,93` — `meta.name()` is the literal `"todo"`. This makes
-   `crates/cache` **actively wrong** (its key is also `"todo"`, so every cached procedure
-   shares one slot) and forces `crates/invalidation` to hardcode `"sfmPost"`.
-2. `flush()` is a public no-op — finish the backpressure mechanism or delete the function.
-3. `fetchExecute`'s batch loader is still module-global, and a throw inside its `setTimeout`
-   leaves every queued caller hanging.
+1. `flush()` is a public no-op — finish the backpressure mechanism or delete the function.
+   The only remaining item that is a decision rather than a bug.
 
 **Verified green:** `cargo check --workspace`; the feature matrix (`legacy` on/off,
 `--no-default-features`); `pnpm build`; `pnpm typecheck`; `cargo check -p aion` downstream.
@@ -103,7 +99,7 @@ not what it intends.
 | Middleware on subscriptions           | ❌    | `MiddlewareHandler` is Future-only (`middleware/middleware.rs:31-40`) — it can wrap the future that *produces* a stream, but cannot see, transform or short-circuit yielded items |
 | Middleware context switching          | 🟡    | Wired through the generics, never tested                                                     |
 | Error mapping across layers           | ❌    | One `TError` is fixed for the whole chain; a middleware cannot convert error types            |
-| Procedure metadata (`meta.name()`)    | ❌    | Always returns the literal string `"todo"` (`rspc/src/procedure.rs:80,93`)                    |
+| Procedure metadata (`meta.name()`)    | ✅    | The router threads each procedure's full nested path into `ErasedProcedure`                  |
 | Backpressure / manual flush           | ❌    | `flush()` is a public no-op: `CAN_FLUSH` is never set true, `SHOULD_FLUSH` never read (`crates/procedure/src/stream.rs:17-37`) |
 | Typed error → wire                    | ✅    | Framework errors all carry `~rspc: true`; user errors stay bare, so that flag discriminates |
 
@@ -150,8 +146,8 @@ not what it intends.
 | -------------- | ----- | ---------------------------------------------------------------------------------------------------------- |
 | `validator`    | ✅    | Small, self-contained, exercised by `examples/core`                                                       |
 | `tracing`      | 🟡    | `todo!()` for stream results (`traceable.rs:24`); imported by `examples/core` but never invoked           |
-| `invalidation` | ❌    | Only `Invalidate::One` works; `Any`/`Many` are `todo!()`. Target name **hardcoded to `"sfmPost"`** with the comment *"Don't do this once `meta.name()` is correct"* |
-| `cache`        | ❌    | Cache key is the literal `"todo"` (`lib.rs:47`) — every cached procedure shares one slot. `ttl` ignored (`memory.rs:18-21`) |
+| `invalidation` | 🟡    | Uses `meta.name()` now instead of a hardcoded `"sfmPost"`; `Invalidate::Any`/`Many` are still `todo!()` |
+| `cache`        | 🟡    | Keyed on `meta.name()` now, so procedures no longer collide; still not keyed on input, and `ttl` is ignored (`memory.rs:18-21`) |
 | `zer` (auth)   | ❌    | `.unwrap()`s on malformed/expired JWTs instead of returning `UnauthorizedError`; disables required claim validation with the comment *"This is very insecure!"* |
 | `binario`      | ❌    | Blocked upstream: the `binario` crate returns non-`Send` futures. Currently stubbed to `todo!()`          |
 | `devtools`     | ❌    | `mount()` is `todo!()`; implementation commented out                                                       |

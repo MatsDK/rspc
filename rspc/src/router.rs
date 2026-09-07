@@ -52,9 +52,7 @@ impl<TCtx> Router<TCtx> {
                 duplicate: Location::caller().clone(),
             });
         } else {
-            let mut procedure = procedure.into();
-            self.setup.extend(procedure.setup.drain(..));
-            self.procedures.insert(vec![key], procedure);
+            self.procedures.insert(vec![key], procedure.into());
         }
 
         self
@@ -137,6 +135,15 @@ impl<TCtx> Router<TCtx> {
         for setup in self.setup {
             setup(&mut state);
         }
+
+        // Deferred to here so each one sees its procedure's full nested path.
+        for (key, procedure) in self.procedures.iter_mut() {
+            let name = get_flattened_name(key);
+            for setup in procedure.setup.drain(..) {
+                setup(&mut state, name.clone());
+            }
+        }
+
         let state = Arc::new(state);
 
         let mut procedure_types = BTreeMap::new();
@@ -144,7 +151,8 @@ impl<TCtx> Router<TCtx> {
             .procedures
             .into_iter()
             .map(|(key, p)| {
-                let (procedure, ty) = (p.inner)(state.clone(), &mut self.types);
+                let name = get_flattened_name(&key);
+                let (procedure, ty) = (p.inner)(name.clone(), state.clone(), &mut self.types);
 
                 let mut current = &mut procedure_types;
                 // TODO: if `key.len()` is `0` we might run into issues here. It shouldn't but probs worth protecting.
@@ -159,7 +167,7 @@ impl<TCtx> Router<TCtx> {
                 }
                 current.insert(key[key.len() - 1].clone(), TypesOrType::Type(ty));
 
-                (get_flattened_name(&key), procedure)
+                (name, procedure)
             })
             .collect::<HashMap<_, _>>();
 

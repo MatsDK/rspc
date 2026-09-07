@@ -75,11 +75,10 @@ impl<TCtx, TInput, TOutput> Procedure<TCtx, TInput, TOutput> {
                     setup: setup
                         .into_iter()
                         .map(|setup| {
-                            let v: Box<dyn FnOnce(&mut State)> =
-                                Box::new(move |state: &mut State| {
-                                    let key: Cow<'static, str> = "todo".to_string().into(); // TODO: Work this out properly
+                            let v: Box<dyn FnOnce(&mut State, Cow<'static, str>)> =
+                                Box::new(move |state: &mut State, key: Cow<'static, str>| {
                                     let meta = ProcedureMeta::new(
-                                        key.into(),
+                                        key,
                                         kind,
                                         Arc::new(State::default()), // TODO: Can we configure a panic instead of this!
                                     );
@@ -89,9 +88,8 @@ impl<TCtx, TInput, TOutput> Procedure<TCtx, TInput, TOutput> {
                         })
                         .collect::<Vec<_>>(),
                     location,
-                    inner: Box::new(move |state, types| {
-                        let key: Cow<'static, str> = "todo".to_string().into(); // TODO: Work this out properly
-                        let meta = ProcedureMeta::new(key.clone(), kind, state);
+                    inner: Box::new(move |key, state, types| {
+                        let meta = ProcedureMeta::new(key, kind, state);
 
                         (
                             rspc_procedure::Procedure::new(move |ctx, input| {

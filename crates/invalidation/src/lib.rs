@@ -94,15 +94,10 @@ impl<E: 'static> Invalidator<E> {
                             todo!(); // TODO: make it work
                         }
                         Invalidate::One(input) => {
-                            println!("{:?} {:?}", meta.name(), "ONE"); // TODO
-
                             // TODO: Avoid `serde_json::Value`?
                             let input: serde_json::Value = serde_json::to_value(&input).unwrap();
 
-                            // let name = meta.name();
-                            let name = "sfmPost"; // TODO: Don't do this once `meta.name()` is correct.
-
-                            if let Some(procedure) = procedures.get(name) {
+                            if let Some(procedure) = procedures.get(meta.name()) {
                                 streams.push(procedure.exec_with_deserializer(ctx, input));
                             } else {
                                 println!("Procedure not found!"); // TODO: Silently fail in future.

@@ -6,10 +6,22 @@ type BatchLoader = {
 	callbacks: ((v: [number, any]) => void)[];
 };
 
-const batchLoaders = {
-	query: null as null | BatchLoader,
-	mutation: null as null | BatchLoader,
+type BatchLoaders = {
+	query: null | BatchLoader;
+	mutation: null | BatchLoader;
 };
+
+// Keyed by url, so two clients pointing at different backends never share a batch.
+const batchLoadersByUrl = new Map<string, BatchLoaders>();
+
+function loadersFor(url: string): BatchLoaders {
+	let loaders = batchLoadersByUrl.get(url);
+	if (!loaders) {
+		loaders = { query: null, mutation: null };
+		batchLoadersByUrl.set(url, loaders);
+	}
+	return loaders;
+}
 
 // - batch: false, stream: false
 // no batching or streaming. execution happens individually and no data is streamed.
@@ -123,6 +135,7 @@ export const fetchExecute = (
 		});
 	} else {
 		const type = args.type;
+		const batchLoaders = loadersFor(config.url);
 		let batchLoader = batchLoaders[type];
 
 		if (!batchLoader) {
@@ -131,13 +144,13 @@ export const fetchExecute = (
 				callbacks: [],
 			};
 
-			setTimeout(async () => {
-				if (!batchLoader) return;
+			const loader = batchLoader;
+			const flush = async () => {
 				batchLoaders[type] = null;
 
 				const resp = await fetch(config.url, {
 					method: "POST",
-					body: JSON.stringify(batchLoader.data),
+					body: JSON.stringify(loader.data),
 					headers: {
 						"Content-Type": "application/json",
 						...(config.stream ? { "rspc-batch-mode": "stream" } : {}),
@@ -147,11 +160,11 @@ export const fetchExecute = (
 				if (!config.stream) {
 					const items: [number, any][] = await resp.json();
 
-					batchLoader.callbacks.forEach((v, i) => {
+					loader.callbacks.forEach((v, i) => {
 						v(items[i]);
 					});
 				} else {
-					if (!resp.body) throw new Error("response has no body??");
+					if (!resp.body) throw new Error("response has no body");
 
 					const reader = resp.body.getReader();
 					const decoder = new TextDecoder();
@@ -169,9 +182,18 @@ export const fetchExecute = (
 						const index = Number.parseInt(match[1]);
 						const [status, data] = JSON.parse(match[2]);
 
-						batchLoader.callbacks[index]?.([status, data]);
+						loader.callbacks[index]?.([status, data]);
 					}
 				}
+			};
+
+			// Without this a throw in here is an unhandled rejection inside a timer, and
+			// every queued caller waits forever.
+			setTimeout(() => {
+				flush().catch((err) => {
+					const message = err instanceof Error ? err.message : String(err);
+					for (const callback of loader.callbacks) callback([500, message]);
+				});
 			}, 1);
 		}
 
@@ -180,8 +202,9 @@ export const fetchExecute = (
 			args.input === undefined ? null : args.input,
 		]);
 
+		const loader = batchLoader;
 		return observable((observer) => {
-			batchLoader.callbacks.push(([status, data]) => {
+			loader.callbacks.push(([status, data]) => {
 				if (status === 200) {
 					observer.next({ type: "data", value: data });
 					observer.complete();

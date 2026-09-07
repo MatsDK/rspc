@@ -42,7 +42,7 @@ impl<TCtx> From<rspc_legacy::Router<TCtx>> for crate::Router<TCtx> {
                         kind,
                         location: Location::caller().clone(), // TODO: This needs to actually be correct
                         setup: Default::default(),
-                        inner: Box::new(move |_, types| {
+                        inner: Box::new(move |_, _, types| {
                             (
                                 layer_to_procedure(key.to_string(), kind, p.exec),
                                 ProcedureType {
