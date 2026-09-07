@@ -120,7 +120,7 @@ not what it intends.
 | Transport                | State | Evidence                                                                                             |
 | ------------------------ | ----- | -------------------------------------------------------------------------------------------------------- |
 | HTTP single (v2)         | ✅    | `integrations/axum/src/endpoint.rs`                                                                      |
-| HTTP batch (v2)          | 🟡    | Implemented, **untested** — `batch_query` is a commented-out stub at the end of `next.rs`                  |
+| HTTP batch (v2)          | 🟡    | Implemented, **untested** — `batch_query` is a commented-out stub at the end of `endpoint.rs`                  |
 | HTTP batch + streaming   | 🟡    | Custom `\d+:[…]\n` line protocol, undocumented and untested                                               |
 | HTTP single + streaming  | ✅    | `Accept: text/event-stream` on a one-off request, frames buffered into an array                            |
 | SSE subscriptions (v2)   | ✅    | Teardown and browser-managed reconnect. No resume: a reconnect restarts the subscription, so servers should emit initial state on subscribe |
@@ -140,7 +140,7 @@ not what it intends.
 | `@rspc/query-core`     | v1      | 🟡    | Shared helpers for the **v1** bindings                                                    |
 | `@rspc/tanstack-query` | —       | ❌    | Currently a byte-identical stale copy of `query-core`, imported by nothing. **The name is right and the slot is needed** — this should become the shared **v2** layer (§1.8) |
 | `@rspc/tauri`          | both    | ✅    | v1 entrypoint wraps the v2 executor — the one place they're bridged cleanly               |
-| `rspc-client` (Rust)   | —       | ❌    | Expects the JSON-RPC envelope `{"result":{"type":…,"data":…}}`; `next.rs` returns the bare value. Wire-incompatible with the v2 HTTP transport (though it would work against the JSON-RPC one) |
+| `rspc-client` (Rust)   | —       | ❌    | Expects the JSON-RPC envelope `{"result":{"type":…,"data":…}}`; `endpoint.rs` returns the bare value. Wire-incompatible with the v2 HTTP transport (though it would work against the JSON-RPC one) |
 
 **Satellite crates**
 
@@ -174,7 +174,7 @@ not what it intends.
    ```
    **Second panic, uncaught.**
 
-The correct implementation is the commented-out line directly above it. And `next.rs:490-493`
+The correct implementation is the commented-out line directly above it. And `endpoint.rs`
 already has a `ProcedureError::Deserialize → 400` arm that **has never once executed**,
 because the `.unwrap()` fires first. Any client sending a bad payload to any procedure kills
 the request task.
@@ -577,7 +577,7 @@ this is a port, not a rewrite.
    | Mode | State | Owed |
    | --- | --- | --- |
    | `batch: false, stream: false` | ✅ | — |
-   | `batch: true,  stream: false` | 🟡 | Server untested (`batch_query` is a commented-out stub at the end of `next.rs`) |
+   | `batch: true,  stream: false` | 🟡 | Server untested (`batch_query` is a commented-out stub at the end of `endpoint.rs`) |
    | `batch: false, stream: true`  | ❌ | Not implemented — the non-batch branch never reads `config.stream`. Build it or delete the option |
    | `batch: true,  stream: true`  | 🟡 | The `\d+:[…]\n` line protocol works but is undocumented and untested end to end |
 
@@ -673,7 +673,7 @@ silently against the release.
 5. **Getting started** — install, define a router, mount on axum, export bindings, call from a
    client. One page, copy-pasteable, and kept in sync with a real example from (3).
 6. **A compatibility matrix** — which client versions talk to which transports and wire
-   formats. Today this is knowable only by reading `jsonrpc_exec.rs` and `next.rs` side by
+   formats. Today this is knowable only by reading `jsonrpc_exec.rs` and `endpoint.rs` side by
    side.
 7. **The wire formats** — JSON-RPC, v2 single, batch, batch+stream, SSE events, and the error
    envelope from Phase B.8. Anyone writing a non-JS client needs this; it exists nowhere.
