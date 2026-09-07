@@ -18,7 +18,7 @@ deprecated = []
 
 [dependencies]
 rspc-procedure = { version = "0.0.1", path = "../procedure" }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
 futures = { workspace = true }
 specta = { workspace = true, features = [
     "serde",

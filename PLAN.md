@@ -11,6 +11,14 @@ code wins.
 | **Doing** | Phase F — clients. Teardown landed; `client`/`tauri`/`react-query` moved v2 to root, v1 to `./legacy`, `./next` gone; React v2 binding written |
 | **Next** | Extract the shared runtime, now that Solid, React and Svelte all exist to extract *from* |
 
+CI exists (`.github/workflows/ci.yml`) and the whole feature matrix is green. Writing it
+immediately found a real bug: `rspc --features legacy` did **not** compile standalone —
+`crates/legacy` declared `serde = { workspace = true }` against a workspace default of
+`default-features = false`, so serde's `Content`/`ContentVisitor` were configured out and
+`#[serde(untagged)]` failed with 16 errors. It only ever built because something else in a
+workspace build turned those features on. Any external consumer enabling the migration
+bridge would have hit it. Fixed with `features = ["derive", "std"]`.
+
 All three framework bindings are on v2 and `pnpm build` + `pnpm typecheck` are both green
 for the first time. Svelte's `useSubscription` returns a `readable` store, so teardown runs
 when the last subscriber goes away — no `onDestroy` at the call site.

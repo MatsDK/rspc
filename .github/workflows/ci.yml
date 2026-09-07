@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --check
+
+      - run: cargo check --workspace
+
+      # Feature-gated code that nobody compiles is how this repo ended up half-built:
+      # `legacy` only built via workspace feature unification, and `ws` is a no-op today.
+      - name: Check feature matrix
+        run: |
+          cargo check -p rspc --no-default-features
+          cargo check -p rspc --features typescript
+          cargo check -p rspc --features typescript,legacy
+          cargo check -p rspc-axum
+          cargo check -p rspc-axum --features ws
+
+      - run: cargo test --workspace
+
+      - run: cargo clippy --workspace --all-targets
+
+  # Parked because they do not compile yet, so they are excluded from the workspace.
+  # This job is expected to fail and exists to say so out loud rather than let them rot.
+  parked:
+    name: Parked crates (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --manifest-path examples/legacy/Cargo.toml
+      - run: cargo check --manifest-path crates/binario/Cargo.toml
+
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
