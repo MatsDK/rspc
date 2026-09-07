@@ -19,9 +19,7 @@ scope here — the docs site is its own repo, and releasing is gated on the nami
    `crates/cache` **actively wrong** (its key is also `"todo"`, so every cached procedure
    shares one slot) and forces `crates/invalidation` to hardcode `"sfmPost"`.
 2. `flush()` is a public no-op — finish the backpressure mechanism or delete the function.
-3. WebSockets no longer exist at all: the JSON-RPC integration was deleted, so reviving them
-   means a fresh implementation against the v2 wire format (`D-2` is now moot).
-4. `fetchExecute`'s batch loader is still module-global, and a throw inside its `setTimeout`
+3. `fetchExecute`'s batch loader is still module-global, and a throw inside its `setTimeout`
    leaves every queued caller hanging.
 
 **Verified green:** `cargo check --workspace`; the feature matrix (`legacy` on/off,
@@ -73,11 +71,15 @@ call for a private consumer that never used v1 syntax and the wrong one for the 
 which would have lost the only bridge its inherited users have. `legacy` is now an opt-in
 feature rather than a default.
 
-That reasoning covers the *server syntax* only. The JSON-RPC/WebSocket transport was
-deleted: v1-syntax procedures are served over v2's HTTP+SSE, so v1 syntax migrates but v1
-**clients** must upgrade. The consequence is that `@rspc/client/legacy`, `query-core` and
-the `*/legacy` bindings are now a client for a protocol nothing speaks — worth deciding on
-deliberately (`D-9`).
+**One flag governs the whole compat surface.** `legacy` turns on the v1 syntax layer *and*
+the JSON-RPC/WebSocket transport (`integrations/axum/src/legacy/`), so a v1 client keeps
+working against a server that has started migrating. Default builds carry none of it.
+
+An earlier pass deleted that transport while keeping the v1 syntax layer and the v1 TS
+packages, which left both halves of compat maintained and the combination broken — server
+syntax migrated incrementally while the client had to be rewritten in one commit. Restored,
+because incremental migration on both ends is the only thing that made keeping any of it
+worthwhile.
 
 ---
 
@@ -124,8 +126,8 @@ not what it intends.
 | HTTP batch + streaming   | 🟡    | Custom `\d+:[…]\n` line protocol, undocumented and untested                                               |
 | HTTP single + streaming  | ✅    | `Accept: text/event-stream` on a one-off request, frames buffered into an array                            |
 | SSE subscriptions (v2)   | ✅    | Teardown and browser-managed reconnect. No resume: a reconnect restarts the subscription, so servers should emit initial state on subscribe |
-| **WebSocket**            | ❌    | Deleted with the JSON-RPC integration. Reviving it means a fresh implementation against the v2 wire format |
-| JSON-RPC wire format     | ❌    | Deleted. Recoverable from git history if a compat transport is ever wanted                                 |
+| **WebSocket**            | ✅    | `integrations/axum/src/legacy/`, behind the `legacy` feature. v1 clients only               |
+| JSON-RPC wire format     | ✅    | Same module. Only transport that carries v1 subscriptions                                   |
 | Tauri IPC                | ✅    | `integrations/tauri` — the most complete integration in the repo, including abort support (`lib.rs:131-135`) |
 
 **Clients**

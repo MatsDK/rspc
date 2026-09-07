@@ -6,3 +6,4 @@ packages:
   - examples/sfm
   - examples/basic
   - examples/deno
+  - examples/legacy

@@ -1,0 +1,11 @@
+{
+	"name": "@rspc/examples-legacy",
+	"type": "module",
+	"private": true,
+	"dependencies": {
+		"@rspc/client": "workspace:*"
+	},
+	"scripts": {
+		"dev": "deno run --allow-net --watch client.ts"
+	}
+}

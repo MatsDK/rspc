@@ -50,7 +50,7 @@ async fn main() {
 
     rspc::Typescript::default()
         .export_to(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bindings.ts"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bindings.ts"),
             &types,
         )
         .unwrap();

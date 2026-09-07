@@ -31,14 +31,14 @@ jobs:
           cargo check -p rspc --features typescript
           cargo check -p rspc --features typescript,legacy
           cargo check -p rspc-axum
-          cargo check -p rspc-axum --features ws
+          cargo check -p rspc-axum --features legacy
 
       - run: cargo test --workspace
 
       - run: cargo clippy --workspace --all-targets
 
-  # Parked because they do not compile yet, so they are excluded from the workspace.
-  # This job is expected to fail and exists to say so out loud rather than let them rot.
+  # Parked because it does not compile yet, so it is excluded from the workspace.
+  # Expected to fail; it exists to say so out loud rather than let the crate rot.
   parked:
     name: Parked crates (informational)
     runs-on: ubuntu-latest
@@ -47,7 +47,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --manifest-path examples/legacy/Cargo.toml
       - run: cargo check --manifest-path crates/binario/Cargo.toml
 
   typescript:

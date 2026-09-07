@@ -9,10 +9,11 @@ members = [
     "./examples/client",
     "./examples/tauri/src-tauri",
     "./examples/anyhow",
+    "./examples/legacy",
 ]
 
-# Don't compile: `legacy` needs `rspc_axum::endpoint`, `binario` needs `Send` futures. See PLAN.md.
-exclude = ["./examples/legacy", "./examples/binario", "./crates/binario"]
+# `binario` needs `Send` futures upstream. See PLAN.md.
+exclude = ["./examples/binario", "./crates/binario"]
 
 [workspace.dependencies]
 # Private
