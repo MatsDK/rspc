@@ -1,107 +1,87 @@
-import { createClient, FetchTransport, WebsocketTransport } from "@rspc/client/legacy";
-import { createReactQueryHooks } from "@rspc/react-query/legacy";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import React, { useState } from "react";
+import { createClient, fetchExecute, sseExecute } from "@rspc/client";
+import {
+  createRSPCOptionsProxy,
+  inferOutput,
+  useSubscription,
+} from "@rspc/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+  useMutation,
+} from "@tanstack/react-query";
+import React from "react";
 
 // Export from Rust. Run `cargo run -p example-axum` to start server and export it!
 import type { Procedures } from "../../../bindings";
 
-export const rspc = createReactQueryHooks<Procedures>();
-
-export const fetchQueryClient = new QueryClient();
-const fetchClient = createClient<Procedures>({
-  transport: new FetchTransport("http://localhost:4000/rspc"),
+const fetchQueryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+    },
+  },
+});
+const url = "http://localhost:4000/rspc";
+const client = createClient<Procedures>((args) => {
+  if (args.type === "subscription") return sseExecute({ url }, args);
+  else return fetchExecute({ url, batch: true, stream: true }, args);
 });
 
-// Custom fetch parameters
-// const fetchClient = createClient<Procedures>({
-//   transport: new FetchTransport("http://localhost:4000/rspc", (input, init) =>
-//     fetch(input, { ...init, credentials: "include" }) // Include Cookies for cross-origin requests
-//   ),
-// });
+const rspc = createRSPCOptionsProxy<Procedures>(client);
 
-const evtSource = new EventSource("http://[::]:4000/rspc/pings", {
-  // withCredentials: true,
-});
-console.log(evtSource);
-evtSource.addEventListener("message", (event) => {
-  console.log(event);
-});
+function Example() {
+  type Version = inferOutput<typeof rspc.version>;
+  const version = useQuery(rspc.version.queryOptions());
+  const validate = useQuery(
+    rspc.validator.queryOptions({ mail: "example@example.com" }),
+  );
 
-export const wsQueryClient = new QueryClient();
-const wsClient = createClient<Procedures>({
-  transport: new WebsocketTransport("ws://localhost:4000/rspc/ws"),
-});
+  const mutation = useMutation(
+    rspc.sendMsg.mutationOptions({
+      onSettled() {
+        fetchQueryClient.invalidateQueries({
+          queryKey: rspc.version.queryKey(),
+        });
+      },
+    }),
+  );
 
-function Example({ name }: { name: string }) {
-  const [rerenderProp, setRendererProp] = useState(Date.now().toString());
-  const { data: version } = rspc.useQuery(["version"]);
-  const { data: transformMe } = rspc.useQuery(["transformMe"]);
-  const { data: echo } = rspc.useQuery(["echo", "Hello From Frontend!"]);
-  const { mutate, isPending } = rspc.useMutation("sendMsg");
-  const { error } = rspc.useQuery(["error"], {
-    retry: false,
-  });
+  const subscription = useSubscription(
+    rspc.basicSubscription.subscriptionOptions(null, {
+      enabled: true,
+      onData(value) {
+        console.log("Data received", value);
+      },
+      onError(err) {
+        console.error(err.type, err.error);
+      },
+    }),
+  );
 
   return (
-    <div
-      style={{
-        border: "black 1px solid",
-      }}
-    >
-      <h1>{name}</h1>
-      <p>Using rspc version: {version}</p>
-      <p>Echo response: {echo}</p>
-      <p>
-        Error returned: {error?.code} {error?.message}
-      </p>
-      <p>Transformed Query: {transformMe}</p>
-      <ExampleSubscription rerenderProp={rerenderProp} />
-      <button onClick={() => setRendererProp(Date.now().toString())}>
-        Rerender subscription
-      </button>
-      <button onClick={() => mutate("Hello!")} disabled={isPending}>
-        Send Msg!
+    <div>
+      <h1>React</h1>
+      {version.isLoading ? <p>Loading</p> : <p>{version.data}</p>}
+      <p>validated {JSON.stringify(validate.data)}</p>
+      <p>subscription {JSON.stringify(subscription.data)}</p>
+      {subscription.error ? <p>Error {subscription.error.type}</p> : null}
+      <p>status {subscription.status}</p>
+      <button onClick={() => mutation.mutate("Message")}>
+        Trigger mutation
       </button>
     </div>
   );
 }
 
-function ExampleSubscription({ rerenderProp }: { rerenderProp: string }) {
-  const [i, setI] = useState(0);
-  rspc.useSubscription(["pings"], {
-    onData(msg) {
-      setI((i) => i + 1);
-    },
-  });
-
-  return (
-    <p>
-      Pings received: {i} {rerenderProp}
-    </p>
-  );
-}
-
+// StrictMode double-invokes effects, so this is also the check that subscription
+// teardown works - without it every mount would leak an SSE connection.
 export default function App() {
   return (
     <React.StrictMode>
-      <div
-        style={{
-          backgroundColor: "rgba(50, 205, 50, .5)",
-        }}
-      >
-        <h1>React</h1>
-        <QueryClientProvider client={fetchQueryClient}>
-          <rspc.Provider client={fetchClient} queryClient={fetchQueryClient}>
-            <Example name="Fetch Transport" />
-          </rspc.Provider>
-        </QueryClientProvider>
-        <rspc.Provider client={wsClient} queryClient={wsQueryClient}>
-          <QueryClientProvider client={wsQueryClient}>
-            <Example name="Websocket Transport" />
-          </QueryClientProvider>
-        </rspc.Provider>
-      </div>
+      <QueryClientProvider client={fetchQueryClient}>
+        <Example />
+      </QueryClientProvider>
     </React.StrictMode>
   );
 }

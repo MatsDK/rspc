@@ -11,6 +11,12 @@ code wins.
 | **Doing** | Phase F — clients. Teardown landed; `client`/`tauri`/`react-query` moved v2 to root, v1 to `./legacy`, `./next` gone; React v2 binding written |
 | **Next** | Svelte 5 binding (what Aion ports onto), then extract the shared runtime from the three |
 
+React is at parity with Solid: options proxy, `useSubscription`, `infer*` helpers, and a
+worked example in `examples/astro` that runs under `StrictMode` — which is the check that
+subscription teardown holds, since without it every mount would leak an SSE connection.
+That example was previously commented out of `index.astro` and calling procedures
+(`transformMe`, `echo`, `pings`) that no longer exist in the generated bindings.
+
 **Phase E (WebSockets) is deliberately after F** — SSE already carries subscriptions, so WS
 is completeness, not a blocker. The client gap is what stops people using this.
 

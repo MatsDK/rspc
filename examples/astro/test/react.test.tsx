@@ -1,5 +1,5 @@
 import React from "react";
-import { RSPCError, Client, createClient, NoOpTransport } from "@rspc/client";
+import { RSPCError, Client, createClient, NoOpTransport } from "@rspc/client/legacy";
 import { createReactQueryHooks } from "@rspc/react-query/legacy";
 import { QueryClient } from "@tanstack/react-query";
 import { Procedures } from "./bindings";

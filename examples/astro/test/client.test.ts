@@ -11,7 +11,7 @@ import {
 	inferInfiniteQueries,
 	inferInfiniteQueryResult,
 	inferInfiniteQueryInput,
-} from "@rspc/client";
+} from "@rspc/client/legacy";
 import { createReactQueryHooks } from "@rspc/react-query/legacy";
 import { MyPaginatedData, Procedures } from "./bindings";
 
