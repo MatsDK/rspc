@@ -45,6 +45,12 @@ pub trait ResolverOutput<TError>: Sized + Send + 'static {
     // TODO: Be an associated type instead so we can constrain later for better errors????
     fn data_type(types: &mut TypeCollection) -> DataType;
 
+    /// The type of a single yielded value. Differs from [`Self::data_type`] only for streams,
+    /// where a subscription yields `T` but a query collects into `Vec<T>`.
+    fn item_data_type(types: &mut TypeCollection) -> DataType {
+        Self::data_type(types)
+    }
+
     /// Convert the procedure into a [`Stream`].
     fn into_stream(self) -> impl Stream<Item = Result<Self::T, ProcedureError>> + Send + 'static;
 
@@ -87,6 +93,10 @@ where
 
     fn data_type(types: &mut TypeCollection) -> DataType {
         <Vec<T>>::data_type(types)
+    }
+
+    fn item_data_type(types: &mut TypeCollection) -> DataType {
+        T::data_type(types)
     }
 
     fn into_stream(self) -> impl Stream<Item = Result<Self::T, ProcedureError>> + Send + 'static {

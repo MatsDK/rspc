@@ -59,6 +59,8 @@ impl<'a> DynOutput<'a> {
 
 impl<'a> fmt::Debug for DynOutput<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!();
+        f.debug_struct("DynOutput")
+            .field("type_name", &self.type_name)
+            .finish_non_exhaustive()
     }
 }

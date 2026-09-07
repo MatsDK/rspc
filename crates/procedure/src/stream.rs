@@ -343,7 +343,7 @@ impl ProcedureStream {
         }
     }
 
-    fn poll_inner(&mut self, cx: &mut Context<'_>) -> Poll<Option<()>> {
+    fn poll_inner(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<(), ProcedureError>>> {
         // Ensure the waker is up to date.
         if let Some(waker) = &mut self.flush {
             if !waker.will_wake(cx.waker()) {
@@ -355,7 +355,7 @@ impl ProcedureStream {
             return if self.flush.is_none() {
                 // We have a queued value ready to be flushed.
                 self.pending_value = false;
-                Poll::Ready(Some(()))
+                Poll::Ready(Some(Ok(())))
             } else {
                 // The async runtime would have no reason to be polling right now but we protect against it anyway.
                 Poll::Pending
@@ -366,10 +366,10 @@ impl ProcedureStream {
             Inner::Dyn(v) => match v.as_mut().poll_next_value(cx) {
                 Poll::Ready(v) => {
                     if self.flush.is_none() {
-                        Poll::Ready(v)
+                        Poll::Ready(v.map(Ok))
                     } else {
                         match v {
-                            Some(v) => {
+                            Some(()) => {
                                 self.pending_value = true;
                                 Poll::Pending
                             }
@@ -381,8 +381,7 @@ impl ProcedureStream {
             },
             Inner::Value(v) => {
                 if self.flush.is_none() {
-                    // Poll::Ready(v.take().map(Err))
-                    todo!();
+                    Poll::Ready(v.take().map(Err))
                 } else {
                     Poll::Pending
                 }
@@ -395,24 +394,28 @@ impl ProcedureStream {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<DynOutput<'_>, ProcedureError>>> {
-        self.poll_inner(cx).map(|v| {
-            v.map(|_: ()| {
-                let Inner::Dyn(s) = &mut self.inner else {
-                    unreachable!(); // TODO: Handle this?
-                };
-                s.as_mut().value()
-            })
-        })
+        match ready!(self.poll_inner(cx)) {
+            None => Poll::Ready(None),
+            Some(Err(err)) => Poll::Ready(Some(Err(err))),
+            Some(Ok(())) => Poll::Ready(Some(self.dyn_value())),
+        }
     }
 
     /// TODO
     pub async fn next(&mut self) -> Option<Result<DynOutput<'_>, ProcedureError>> {
-        poll_fn(|cx| self.poll_inner(cx)).await.map(|_: ()| {
-            let Inner::Dyn(s) = &mut self.inner else {
-                unreachable!(); // TODO: Handle this?
-            };
-            s.as_mut().value()
-        })
+        match poll_fn(|cx| self.poll_inner(cx)).await {
+            None => None,
+            Some(Err(err)) => Some(Err(err)),
+            Some(Ok(())) => Some(self.dyn_value()),
+        }
+    }
+
+    /// Only valid after `poll_inner` yields `Ok`, which only `Inner::Dyn` does.
+    fn dyn_value(&mut self) -> Result<DynOutput<'_>, ProcedureError> {
+        match &mut self.inner {
+            Inner::Dyn(s) => s.as_mut().value(),
+            Inner::Value(_) => unreachable!(),
+        }
     }
 
     /// TODO
@@ -448,23 +451,21 @@ impl<F: FnMut(Result<DynOutput, ProcedureError>) -> Result<T, String> + Unpin, T
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        this.stream.poll_inner(cx).map(|v| {
-            v.map(|_: ()| {
-                let Inner::Dyn(s) = &mut this.stream.inner else {
-                    unreachable!();
-                };
+        let value = match ready!(this.stream.poll_inner(cx)) {
+            None => return Poll::Ready(None),
+            Some(Ok(())) => this.stream.dyn_value(),
+            Some(Err(err)) => Err(err),
+        };
 
-                match (this.map)(s.as_mut().value()) {
-                    Ok(v) => v,
-                    // TODO: Exposing this error to the client or not?
-                    // TODO: Error type???
-                    Err(err) => {
-                        println!("Error serialzing {err:?}");
-                        todo!();
-                    }
-                }
-            })
-        })
+        match (this.map)(value) {
+            Ok(v) => Poll::Ready(Some(v)),
+            // TODO: Exposing this error to the client or not?
+            // TODO: Error type???
+            Err(err) => {
+                println!("Error serialzing {err:?}");
+                todo!();
+            }
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -474,7 +475,9 @@ impl<F: FnMut(Result<DynOutput, ProcedureError>) -> Result<T, String> + Unpin, T
 
 impl fmt::Debug for ProcedureStream {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!();
+        f.debug_struct("ProcedureStream")
+            .field("resolved", &self.resolved())
+            .finish_non_exhaustive()
     }
 }
 

@@ -95,24 +95,28 @@ impl<TCtx, TInput, TOutput> Procedure<TCtx, TInput, TOutput> {
 
                         (
                             rspc_procedure::Procedure::new(move |ctx, input| {
+                                let input = match TInput::from_input(input) {
+                                    Ok(input) => input,
+                                    Err(err) => return err.into(),
+                                };
+
                                 TOutput::into_procedure_stream(
-                                    handler(
-                                        ctx,
-                                        TInput::from_input(input).unwrap(), // TODO: Error handling
-                                        meta.clone(),
-                                    )
-                                    .into_stream()
-                                    .map_ok(|v| v.into_stream())
-                                    .map_err(|err| err.into_procedure_error())
-                                    .try_flatten()
-                                    .into_stream(),
+                                    handler(ctx, input, meta.clone())
+                                        .into_stream()
+                                        .map_ok(|v| v.into_stream())
+                                        .map_err(|err| err.into_procedure_error())
+                                        .try_flatten()
+                                        .into_stream(),
                                 )
                             }),
                             ProcedureType {
                                 kind,
                                 location,
                                 input: TInput::data_type(types),
-                                output: TOutput::data_type(types),
+                                output: match kind {
+                                    ProcedureKind::Subscription => TOutput::item_data_type(types),
+                                    _ => TOutput::data_type(types),
+                                },
                                 error: <TError as Type>::reference(types, &[]).inner,
                             },
                         )

@@ -50,9 +50,9 @@ impl State {
         })
     }
 
-    pub fn get_mut<T: Send + Sync + 'static>(&self) -> Option<&T> {
-        self.0.get(&TypeId::of::<T>()).map(|v| {
-            v.downcast_ref::<T>()
+    pub fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
+        self.0.get_mut(&TypeId::of::<T>()).map(|v| {
+            v.downcast_mut::<T>()
                 .expect("unreachable: TypeId matches but downcast failed")
         })
     }

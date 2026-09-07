@@ -3,6 +3,30 @@
 **Status: plan. Agreed intent, not shipped code.** Where this disagrees with the code, the
 code wins.
 
+## Current work
+
+| | |
+| --- | --- |
+| **Branch** | `fix/procedure-error-propagation` off `6607673` |
+| **Phase** | B — correctness, then D.1 |
+| **Done, uncommitted** | B.1 `procedure.rs` propagates deserialization errors · B.2 `poll_inner` yields the error instead of `todo!()` · B.5 three `Debug` impls · B.6 `State::get_mut` · **D.1 subscriptions export `T`, not `Vec<T>`** |
+| **Next** | C.1 real `meta.name()` — unblocks `cache` and `invalidation` |
+| **Blocked on a decision** | B.4, B.7, B.8 |
+
+**D.1 is a breaking change to generated bindings.** Subscriptions lose one array level, so
+any consumer unwrapping it by hand must drop that workaround in the same change — Aion's
+`UnwrapSubscriptions` is deleted alongside.
+
+**Order agreed:** core correctness → core completeness → type export → transports → clients
+→ extras. Anything that changes a contract clients depend on (error envelope, subscription
+types, wire format) lands before the clients do.
+
+**Verified with** `cargo check -p rspc-procedure` and `-p rspc --features typescript`.
+
+Tests are deferred for now — they come back in Phase I, once the API has stopped moving.
+
+Done: Phase A.1, A.2 (`6607673`).
+
 ## Why this document exists
 
 Upstream rspc is discontinued — see the notice in `README.md` and
