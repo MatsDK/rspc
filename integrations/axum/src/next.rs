@@ -35,7 +35,7 @@ pub fn flush() {
 
 macro_rules! rspc_err_json {
 	($json:expr) => {
-		json!({ "__rspc": $json })
+		json!({ "~rspc": true, "message": $json })
 	}
 }
 
@@ -46,6 +46,11 @@ macro_rules! rspc_err_body {
                 .expect("converting known json should never fail"),
         )
     };
+}
+
+/// Serializes via [`ProcedureError`]'s own impl, so the envelope matches the one the core emits.
+fn procedure_err_body(err: &ProcedureError) -> Body {
+    Body::from(serde_json::to_vec(err).expect("converting known json should never fail"))
 }
 
 pub struct Endpoint<TCtx, TCtxFn, S> {
@@ -100,9 +105,7 @@ where
                                 return Response::builder()
                                     .status(StatusCode::NOT_FOUND)
                                     .header("Content-Type", "application/json")
-                                    .body(rspc_err_body!(format!(
-                                        "procedure not found: {procedure_name}"
-                                    )))
+                                    .body(procedure_err_body(&ProcedureError::NotFound))
                                     .unwrap();
                             };
 
@@ -179,9 +182,7 @@ where
                                     return Err(Response::builder()
                                         .status(StatusCode::NOT_FOUND)
                                         .header("Content-Type", "application/json")
-                                        .body(rspc_err_body!(format!(
-                                            "procedure '{procedure_name}' not found"
-                                        )))
+                                        .body(procedure_err_body(&ProcedureError::NotFound))
                                         .unwrap());
                                 };
 
@@ -278,7 +279,7 @@ where
                 |e| match e {
                     NextError::Procedure(code, message) => SSEEvent::Error {
                         status: code.as_u16(),
-                        data: json!({"__rspc": message}),
+                        data: rspc_err_json!(message),
                     },
                     NextError::Resolver(data) => SSEEvent::Error {
                         status: 500,
@@ -493,12 +494,17 @@ enum NextError {
 async fn next(stream: &mut ProcedureStream) -> Option<Result<serde_json::Value, NextError>> {
     stream.next().await.map(|v| {
         v.map_err(|err| match err {
-            ProcedureError::NotFound => unimplemented!(), // Isn't created by this executor
+            ProcedureError::NotFound => {
+                NextError::Procedure(StatusCode::NOT_FOUND, err.message().to_string())
+            }
             ProcedureError::Deserialize(_) => NextError::Procedure(
                 StatusCode::BAD_REQUEST,
                 "error deserializing procedure arguments".to_string(),
             ),
-            ProcedureError::Downcast(_) => unimplemented!(), // Isn't supported by this executor
+            ProcedureError::Downcast(_) => NextError::Procedure(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.message().to_string(),
+            ),
             ProcedureError::Resolver(resolver_err) => NextError::Resolver(resolver_err),
             ProcedureError::Unwind(err) => panic!("{err:?}"), // Restore previous behavior lol
                                                               // ProcedureError::Serializer(err) => panic!("{err:?}"),
@@ -615,7 +621,8 @@ mod test {
 
     fn assert_rspc_err(parts: &http::response::Parts, body: &Value, status: StatusCode) {
         assert_eq!(parts.status, status);
-        assert!(body["__rspc"].is_string());
+        assert_eq!(body["~rspc"], true);
+        assert!(body["message"].is_string());
     }
 
     #[tokio::test]

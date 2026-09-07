@@ -8,14 +8,30 @@ code wins.
 | | |
 | --- | --- |
 | **Branch** | `fix/procedure-error-propagation` off `6607673` |
-| **Phase** | B — correctness, then D.1 |
-| **Done, uncommitted** | B.1 `procedure.rs` propagates deserialization errors · B.2 `poll_inner` yields the error instead of `todo!()` · B.5 three `Debug` impls · B.6 `State::get_mut` · **D.1 subscriptions export `T`, not `Vec<T>`** |
-| **Next** | C.1 real `meta.name()` — unblocks `cache` and `invalidation` |
-| **Blocked on a decision** | B.4, B.7, B.8 |
+| **Next** | Phase E — port the WebSocket path back in |
 
-**D.1 is a breaking change to generated bindings.** Subscriptions lose one array level, so
-any consumer unwrapping it by hand must drop that workaround in the same change — Aion's
-`UnwrapSubscriptions` is deleted alongside.
+**Done** (`6607673`, `30eadcf`, `1140a84`):
+
+- A.1, A.2 — legacy restored as opt-in, workspace resolves, `PLAN.md` added.
+- B.1 — `procedure.rs` returns deserialization errors instead of `.unwrap()`ing them.
+- B.2 — `poll_inner` carries the error so `Inner::Value` yields instead of hitting `todo!()`.
+  These two together were the double-panic.
+- B.5 — `Debug` for `ProcedureStream`, `DynInput`, `DynOutput`.
+- B.6 — `State::get_mut` took `&self` and returned `&T`.
+- D.1 — subscriptions export `T`; `rspc::Stream` in a query still exports `Vec<T>`, via a
+  defaulted `ResolverOutput::item_data_type`. Breaking for generated bindings: consumers
+  unwrapping by hand must drop that workaround in the same change (Aion's
+  `UnwrapSubscriptions` was deleted alongside).
+
+- B.7, B.8 — one error envelope. Every framework error now carries `~rspc: true`; user
+  errors stay bare, so that flag is the discriminator. `ProcedureError::NotFound` is
+  constructed at both routing sites and serialized through the core's own impl, and the
+  `unimplemented!()` arms for `NotFound`/`Downcast` return responses instead of panicking.
+
+**Deferred, and why:** C.1 (`meta.name()` returns `"todo"`) only matters because `cache` and
+`invalidation` are built on it — both are extras, so it moves to Phase G with them.
+B.4 (`todo!()` on map failure) needs `ProcedureStreamMap`'s `Item` to become
+`Result<T, String>`; park it until the transport work says what it needs.
 
 **Order agreed:** core correctness → core completeness → type export → transports → clients
 → extras. Anything that changes a contract clients depend on (error envelope, subscription
@@ -708,6 +724,24 @@ Runs alongside D–H, tracked separately so it doesn't get dropped.
 ---
 
 ## 4. Open decisions
+
+**`D-7` — What is the error envelope?** *(now the blocking one)*
+Three shapes go out on the wire today: a resolver error serializes as the user's bare value;
+`ProcedureError`'s own `Serialize` emits `{"~rspc": true, "variant", "message"}`
+(`crates/procedure/src/error.rs:108`); and `rspc-axum` emits `{"__rspc": "<string>"}` from its
+own macro (`integrations/axum/src/next.rs:38`). Two markers, two shapes, same class of error.
+**No client reads either** — `grep '__rspc\|~rspc' packages/*/src` is empty — so they are
+write-only today and standardizing breaks nothing. This got sharper with `1140a84`: the 400
+path now actually fires, so clients start receiving framework errors they never saw before,
+and cannot tell them apart from a typed application error.
+Recommendation: one envelope for framework errors, emitted from one place, with user errors
+staying bare so typed errors remain ergonomic. That requires constructing
+`ProcedureError::NotFound` (`D-8`) so axum's ad-hoc cases can flow through the real
+serializer instead of the macro.
+
+**`D-8` — Wire up or delete `ProcedureError::NotFound`?** Never constructed anywhere; both
+integrations meet it with `unimplemented!()`. Folded into `D-7`: wiring it up is what lets
+the envelope be produced in one place.
 
 **`D-1` — Does the v1 compatibility layer stay?**
 **Recommendation: yes, and it is close to non-negotiable.** Upstream is gone, so this fork is
