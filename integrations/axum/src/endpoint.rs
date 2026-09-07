@@ -109,6 +109,14 @@ where
                                     .unwrap();
                             };
 
+                            let Ok(body) = to_bytes(body, usize::MAX).await else {
+                                return Response::builder()
+                                    .status(StatusCode::BAD_REQUEST)
+                                    .header("Content-Type", "application/json")
+                                    .body(rspc_err_body!("failed to read request body"))
+                                    .unwrap();
+                            };
+
                             match parts.method {
                                 Method::GET => handle_procedure(
                                     ctx_fn,
@@ -129,14 +137,9 @@ where
                                 .into_response(),
                                 Method::POST => handle_procedure(
                                     ctx_fn,
-                                    {
-                                        let body = to_bytes(body, usize::MAX).await.unwrap(); // TODO: error handling
-                                        (!body.is_empty())
-                                            .then(|| {
-                                                serde_json::from_slice(body.to_vec().as_slice())
-                                            })
-                                            .unwrap_or(Ok(None))
-                                    },
+                                    (!body.is_empty())
+                                        .then(|| serde_json::from_slice(&body))
+                                        .unwrap_or(Ok(None)),
                                     parts,
                                     &procedure,
                                     state.0,
@@ -163,8 +166,14 @@ where
                         struct BatchInput(Vec<(String, Value)>);
 
                         let Ok(input) = ({
-                            let body = to_bytes(body, usize::MAX).await.unwrap(); // TODO: error handling
-                            serde_json::from_slice::<BatchInput>(body.to_vec().as_slice())
+                            let Ok(body) = to_bytes(body, usize::MAX).await else {
+                                return Response::builder()
+                                    .status(StatusCode::BAD_REQUEST)
+                                    .header("Content-Type", "application/json")
+                                    .body(rspc_err_body!("failed to read request body"))
+                                    .unwrap();
+                            };
+                            serde_json::from_slice::<BatchInput>(&body)
                         }) else {
                             return Response::builder()
                                 .status(StatusCode::BAD_REQUEST)
@@ -518,14 +527,12 @@ async fn next(stream: &mut ProcedureStream) -> Option<Result<serde_json::Value, 
                 ));
             };
 
-            value
-                .serialize(serde_json::value::Serializer)
-                .map_err(|_| {
-                    NextError::Procedure(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "failed to serialize procedure result".to_string(),
-                    )
-                })
+            value.serialize(serde_json::value::Serializer).map_err(|_| {
+                NextError::Procedure(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to serialize procedure result".to_string(),
+                )
+            })
         })
     })
 }

@@ -11,13 +11,23 @@ code wins.
 | **State** | Core is sound, all three framework clients are on v2, CI green across the feature matrix |
 | **Next** | `flush()` — finish the backpressure mechanism or delete the public no-op |
 
-Core cleanup pass: `rspc` compiles with **zero warnings**, core TODOs down 151 → 134. Removed
+Core cleanup pass: `rspc` compiles with **zero warnings in every feature state**, core TODOs
+down 151 → 113. Removed
 the dead `rspc/src/mod.rs` orphan (it declared a module that never existed), `logger.rs` (all
 commented out), and the `rust` language feature — `languages/rust.rs` had zero non-comment
 lines, so the flag compiled an empty module, the same lie the `ws` flag was. Legacy-only
 imports are now `cfg`-gated so neither feature state warns. The export path no longer
 `.unwrap()`s each `DataType`→string conversion; `generate_bindings` returns `ExportError`,
 which matters because export usually runs in a build script.
+
+Going through the `// TODO`s properly turned up a real bug rather than just noise:
+`Router::merge` only compared keys for **equality**, so merging a router with `procedure("a")`
+into one with `nest("a", …)` produced both `["a"]` and `["a","b"]` and then panicked in
+`build()` on an `unreachable!()`. Merge now rejects prefix collisions, which is what makes
+that branch genuinely unreachable. Also fixed: two `to_bytes(..).unwrap()` calls on the
+request body in the axum endpoint (a truncated upload panicked the task), the missing `Debug`
+impls the TODOs asked for, `Next`'s over-broad `pub(crate)`, and `Types` gained
+`types()`/`procedure_names()` accessors plus a `Debug` that prints something.
 
 **What still stands between this and a working library.** Docs and publishing are out of
 scope here — the docs site is its own repo, and releasing is gated on the naming decision

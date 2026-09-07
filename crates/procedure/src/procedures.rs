@@ -26,15 +26,6 @@ impl<TCtx> Procedures<TCtx> {
     }
 }
 
-// TODO: Should this come back?? `State` makes it rough.
-// impl<TCtx> From<HashMap<Cow<'static, str>, Procedure<TCtx>>> for Procedures<TCtx> {
-//     fn from(procedures: HashMap<Cow<'static, str>, Procedure<TCtx>>) -> Self {
-//         Self {
-//             procedures: procedures.into_iter().map(|(k, v)| (k.into(), v)).collect(),
-//         }
-//     }
-// }
-
 impl<TCtx> Clone for Procedures<TCtx> {
     fn clone(&self) -> Self {
         Self {
@@ -71,7 +62,8 @@ impl<TCtx> IntoIterator for Procedures<TCtx> {
 //     }
 // }
 
-// TODO: Is `Deref` okay for this usecase?
+/// Read-only access to the procedure map; `Procedures` owns its `State`, so it cannot be
+/// built from a bare map.
 impl<TCtx> Deref for Procedures<TCtx> {
     type Target = HashMap<Cow<'static, str>, Procedure<TCtx>>;
 

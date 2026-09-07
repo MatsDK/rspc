@@ -1,4 +1,4 @@
-use std::{borrow::Cow, panic::Location, sync::Arc};
+use std::{borrow::Cow, fmt, panic::Location, sync::Arc};
 
 use specta::TypeCollection;
 
@@ -19,15 +19,25 @@ pub struct ErasedProcedure<TCtx> {
     >,
 }
 
-// TODO: `Debug`, `PartialEq`, `Eq`, `Hash`
+impl<TCtx> fmt::Debug for ErasedProcedure<TCtx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ErasedProcedure")
+            .field("kind", &self.kind)
+            .field("location", &self.location)
+            .finish_non_exhaustive()
+    }
+}
 
 impl<TCtx> ErasedProcedure<TCtx> {
-    // TODO: Expose all fields
+    /// Whether this is a query, mutation or subscription.
+    pub fn kind(&self) -> ProcedureKind {
+        self.kind
+    }
 
-    // TODO: Make `pub`
-    // pub(crate) fn kind(&self) -> ProcedureKind2 {
-    //     self.kind
-    // }
+    /// Where the procedure was defined, for error reporting.
+    pub fn location(&self) -> &Location<'static> {
+        &self.location
+    }
 
     // /// Export the [Specta](https://docs.rs/specta) types for this procedure.
     // ///

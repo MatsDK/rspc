@@ -3,9 +3,8 @@ use std::fmt;
 use crate::{middleware::MiddlewareHandler, procedure::ProcedureMeta};
 
 pub struct Next<TError, TCtx, TInput, TReturn> {
-    // TODO: `pub(super)` over `pub(crate)`
-    pub(crate) meta: ProcedureMeta,
-    pub(crate) next: MiddlewareHandler<TError, TCtx, TInput, TReturn>,
+    pub(super) meta: ProcedureMeta,
+    pub(super) next: MiddlewareHandler<TError, TCtx, TInput, TReturn>,
 }
 
 impl<TError, TCtx, TInput, TReturn> fmt::Debug for Next<TError, TCtx, TInput, TReturn> {

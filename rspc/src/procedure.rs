@@ -77,11 +77,10 @@ impl<TCtx, TInput, TOutput> Procedure<TCtx, TInput, TOutput> {
                         .map(|setup| {
                             let v: Box<dyn FnOnce(&mut State, Cow<'static, str>)> =
                                 Box::new(move |state: &mut State, key: Cow<'static, str>| {
-                                    let meta = ProcedureMeta::new(
-                                        key,
-                                        kind,
-                                        Arc::new(State::default()), // TODO: Can we configure a panic instead of this!
-                                    );
+                                    // Setup runs while state is still being built, so it
+                                    // gets `&mut State` directly; `meta.state()` is empty.
+                                    let meta =
+                                        ProcedureMeta::new(key, kind, Arc::new(State::default()));
                                     setup(state, meta);
                                 });
                             v

@@ -1,5 +1,4 @@
 use std::{
-    borrow::Borrow,
     collections::BTreeMap,
     fs::{self, File},
     io::Write,
@@ -10,7 +9,6 @@ use std::{
 };
 
 use futures::Stream;
-use rspc_procedure::Procedures;
 use serde_json::Value;
 use specta::{datatype::FunctionResultVariant, DataType, TypeCollection};
 use specta_typescript::{self as ts, datatype, export_named_datatype, Typescript};

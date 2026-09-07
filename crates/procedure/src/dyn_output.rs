@@ -18,10 +18,8 @@ enum Repr<'a> {
     Value(&'a mut (dyn Any + Send)),
 }
 
-// TODO: `Debug`, etc traits
-
 impl<'a> DynOutput<'a> {
-    // TODO: We depend on the type of `T` can we either force it so this can be public?
+    // Not public: the caller must already know `T` to get the value back out.
     pub(crate) fn new_value<T: Send + 'static>(value: &'a mut T) -> Self {
         Self {
             inner: Repr::Value(value),

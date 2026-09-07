@@ -96,9 +96,16 @@ impl<TCtx> Router<TCtx> {
     #[track_caller]
     pub fn merge(mut self, mut other: Self) -> Self {
         for (k, original) in other.procedures.iter() {
-            if let Some(new) = self.procedures.get(k) {
+            // A prefix collides too: `a` and `a.b` cannot both exist, since `a` would have
+            // to be a procedure and a router at once.
+            let conflict = self
+                .procedures
+                .iter()
+                .find(|(existing, _)| existing.starts_with(k) || k.starts_with(existing));
+
+            if let Some((path, new)) = conflict {
                 self.errors.push(DuplicateProcedureKeyError {
-                    path: k.clone(),
+                    path: path.clone(),
                     original: original.location,
                     duplicate: new.location,
                 });
@@ -154,18 +161,23 @@ impl<TCtx> Router<TCtx> {
                 let name = get_flattened_name(&key);
                 let (procedure, ty) = (p.inner)(name.clone(), state.clone(), &mut self.types);
 
-                let mut current = &mut procedure_types;
-                // TODO: if `key.len()` is `0` we might run into issues here. It shouldn't but probs worth protecting.
-                for part in &key[..(key.len() - 1)] {
-                    let a = current
-                        .entry(part.clone())
-                        .or_insert_with(|| TypesOrType::Types(Default::default()));
-                    match a {
-                        TypesOrType::Type(_) => unreachable!(), // TODO: Confirm this is unreachable
-                        TypesOrType::Types(map) => current = map,
+                if let Some((leaf, parents)) = key.split_last() {
+                    let mut current = &mut procedure_types;
+                    for part in parents {
+                        let entry = current
+                            .entry(part.clone())
+                            .or_insert_with(|| TypesOrType::Types(Default::default()));
+
+                        match entry {
+                            // `merge` rejects prefix collisions, so a parent is never a leaf.
+                            TypesOrType::Type(_) => {
+                                unreachable!("procedure {part:?} is both a procedure and a router")
+                            }
+                            TypesOrType::Types(map) => current = map,
+                        }
                     }
+                    current.insert(leaf.clone(), TypesOrType::Type(ty));
                 }
-                current.insert(key[key.len() - 1].clone(), TypesOrType::Type(ty));
 
                 (name, procedure)
             })

@@ -1,25 +1,21 @@
 use std::{borrow::Cow, collections::BTreeMap, path::Path};
 
 use serde_json::json;
-use specta_typescript::{datatype, BigIntExportBehavior, CommentFormatterFn, ExportError, FormatterFn};
+use specta_typescript::{
+    datatype, BigIntExportBehavior, CommentFormatterFn, ExportError, FormatterFn,
+};
 
 use crate::{procedure::ProcedureType, types::TypesOrType, ProcedureKind, Types};
 
 #[cfg(feature = "legacy")]
-use std::iter::once;
-#[cfg(feature = "legacy")]
-use specta::{datatype::DataType, NamedType, Type};
-#[cfg(feature = "legacy")]
-use specta_typescript::export_named_datatype;
-#[cfg(feature = "legacy")]
 use crate::util::literal_object;
+#[cfg(feature = "legacy")]
+use specta::{NamedType, Type};
 
 pub struct Typescript {
     inner: specta_typescript::Typescript,
     generate_source_maps: bool,
 }
-
-// TODO: Traits - `Debug`, `Clone`, etc
 
 impl Default for Typescript {
     fn default() -> Self {
@@ -120,7 +116,6 @@ impl Typescript {
                     name.to_string(),
                     pos,
                     (
-                        // TODO: Don't cast
                         procedure_type.location.line() as usize,
                         procedure_type.location.column() as usize,
                     ),
@@ -350,7 +345,6 @@ impl SourceMap {
                         .unwrap_or(*actual_name_id);
                     last_name_id = Some(*actual_name_id);
 
-                    // TODO: Don't integer cast
                     let input = [
                         col as i64,
                         source_file as i64,

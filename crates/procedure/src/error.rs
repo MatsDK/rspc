@@ -76,7 +76,6 @@ impl From<DowncastError> for ProcedureError {
 
 impl fmt::Debug for ProcedureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: Proper format
         match self {
             Self::NotFound => write!(f, "NotFound"),
             Self::Deserialize(err) => write!(f, "Deserialize({err:?})"),
