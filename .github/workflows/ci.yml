@@ -32,8 +32,11 @@ jobs:
           cargo check -p rspc --features typescript,legacy
           cargo check -p rspc-axum
           cargo check -p rspc-axum --features legacy
+          cargo check -p rspc-axum --features ws
 
       - run: cargo test --workspace
+
+      - run: cargo test -p rspc-axum --features ws
 
       - run: cargo clippy --workspace --all-targets
 

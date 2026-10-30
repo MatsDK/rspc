@@ -6,8 +6,11 @@
     html_favicon_url = "https://github.com/specta-rs/rspc/raw/main/.github/logo.png"
 )]
 
+#[macro_use]
 mod endpoint;
 mod extractors;
+#[cfg(feature = "ws")]
+mod ws;
 
 /// The rspc 0.3 JSON-RPC + WebSocket transport, so v1 clients keep working while a server
 /// migrates procedure by procedure. Pairs with `rspc`'s `legacy` feature.

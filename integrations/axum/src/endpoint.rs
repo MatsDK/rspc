@@ -81,10 +81,37 @@ where
         self
     }
 
+    /// With the `ws` feature, also serves every procedure over a WebSocket at `/ws` (see the
+    /// `ws` module docs for the protocol), which shadows a procedure named `ws`.
     pub fn build(self) -> Router<S> {
         let procedures = Arc::new(self.procedures);
 
-        Router::<S>::new()
+        #[cfg(feature = "ws")]
+        let ws_route = {
+            use axum::extract::{FromRequestParts, ws::WebSocketUpgrade};
+
+            let procedures = procedures.clone();
+            let ctx_fn = self.ctx_fn.clone();
+
+            axum::routing::get(
+                move |state: State<S>, req: axum::extract::Request<Body>| async move {
+                    let (mut parts, _) = req.into_parts();
+                    let upgrade =
+                        match WebSocketUpgrade::from_request_parts(&mut parts, &state.0).await {
+                            Ok(upgrade) => upgrade,
+                            Err(rejection) => return rejection.into_response(),
+                        };
+
+                    upgrade
+                        .on_upgrade(move |socket| {
+                            crate::ws::serve(socket, procedures, ctx_fn, parts, state.0)
+                        })
+                        .into_response()
+                },
+            )
+        };
+
+        let router = Router::<S>::new()
             .route(
                 "/{id}",
                 on(MethodFilter::GET.or(MethodFilter::POST), {
@@ -212,7 +239,12 @@ where
                         .await
                     }
                 })
-            })
+            });
+
+        #[cfg(feature = "ws")]
+        let router = router.route("/ws", ws_route);
+
+        router
     }
 }
 
@@ -285,15 +317,12 @@ where
             };
 
             let data = v.map_or_else(
-                |e| match e {
-                    NextError::Procedure(code, message) => SSEEvent::Error {
-                        status: code.as_u16(),
-                        data: rspc_err_json!(message),
-                    },
-                    NextError::Resolver(data) => SSEEvent::Error {
-                        status: 500,
-                        data: json!(data.value()),
-                    },
+                |e| {
+                    let (status, data) = e.into_status_and_data();
+                    SSEEvent::Error {
+                        status: status.as_u16(),
+                        data,
+                    }
                 },
                 SSEEvent::Item,
             );
@@ -410,14 +439,11 @@ where
             .await
             {
                 Some(Ok(value)) => (200, value),
-                Some(Err(NextError::Procedure(status, body))) => {
-                    (status.as_u16(), rspc_err_json!(body))
-                }
-                Some(Err(NextError::Resolver(resolver_error))) => {
-                    (500, json!(resolver_error.value()))
+                Some(Err(err)) => {
+                    let (status, data) = err.into_status_and_data();
+                    (status.as_u16(), data)
                 }
                 None => (500, rspc_err_json!("procedure didn't produce a value")),
-                _ => unreachable!(),
             }
         }));
     }
@@ -495,12 +521,24 @@ where
     }
 }
 
-enum NextError {
+pub(crate) enum NextError {
     Procedure(StatusCode, String),
     Resolver(ResolverError),
 }
 
-async fn next(stream: &mut ProcedureStream) -> Option<Result<serde_json::Value, NextError>> {
+impl NextError {
+    /// The status and body a streaming transport sends for this error.
+    pub(crate) fn into_status_and_data(self) -> (StatusCode, Value) {
+        match self {
+            NextError::Procedure(status, message) => (status, rspc_err_json!(message)),
+            NextError::Resolver(err) => (StatusCode::INTERNAL_SERVER_ERROR, json!(err.value())),
+        }
+    }
+}
+
+pub(crate) async fn next(
+    stream: &mut ProcedureStream,
+) -> Option<Result<serde_json::Value, NextError>> {
     stream.next().await.map(|v| {
         v.map_err(|err| match err {
             ProcedureError::NotFound => {

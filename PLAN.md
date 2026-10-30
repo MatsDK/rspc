@@ -140,7 +140,8 @@ not what it intends.
 | HTTP batch + streaming   | 🟡    | Custom `\d+:[…]\n` line protocol, undocumented and untested                                               |
 | HTTP single + streaming  | ✅    | `Accept: text/event-stream` on a one-off request, frames buffered into an array                            |
 | SSE subscriptions (v2)   | ✅    | Teardown and browser-managed reconnect. No resume: a reconnect restarts the subscription, so servers should emit initial state on subscribe |
-| **WebSocket**            | ✅    | `integrations/axum/src/legacy/`, behind the `legacy` feature. v1 clients only               |
+| WebSocket (v2)           | ✅    | `integrations/axum/src/ws.rs`, behind the `ws` feature, at `/ws`. Same item/error/stopped shapes as SSE, many subscriptions per socket. No client executor yet (Phase E.3) |
+| WebSocket (v1)           | ✅    | `integrations/axum/src/legacy/`, behind the `legacy` feature. v1 clients only               |
 | JSON-RPC wire format     | ✅    | Same module. Only transport that carries v1 subscriptions                                   |
 | Tauri IPC                | ✅    | `integrations/tauri` — the most complete integration in the repo, including abort support (`lib.rs:131-135`) |
 
@@ -572,14 +573,11 @@ this is a port, not a rewrite.
 1. **Re-enable `endpoint.rs`** — uncomment `mod endpoint;` at `lib.rs:9`, update axum-0.7
    path syntax (`"/:id"` → `"/{id}"`, `endpoint.rs:33`) and whatever else axum 0.8 moved,
    and replace the `.unwrap()` on the WS upgrade extractor (`endpoint.rs:47`).
-2. **Decide the WS wire format** (`D-2`). `endpoint.rs` speaks JSON-RPC via `jsonrpc_exec`.
-   Either keep that as the compatibility transport (v1 clients keep working unchanged), or
-   also offer WS speaking the newer shape. Keeping JSON-RPC for WS and the new shape for
-   HTTP+SSE is coherent, but must be documented rather than discovered.
-3. **Add `wsExecute` to the v2 client** so v2 apps can use WebSockets. `transport.ts:76-132`'s
-   `WebsocketTransport`, including its reconnect handling, is the reference implementation.
-4. **Make the `ws` feature honest.** It currently compiles and does nothing because the module
-   is commented out. After (1) it becomes real — and CI must build both with and without it.
+2. ~~Decide the WS wire format~~ (`D-2`): both. `legacy` keeps JSON-RPC for v1 clients; the
+   `ws` feature serves v2 in the SSE shapes, documented in `ws.rs`. CI checks and tests it.
+3. **Add `wsExecute` to the v2 client** so v2 apps can use WebSockets. Aion's
+   `apps/web/src/lib/socket-execute.ts` already speaks the `ws.rs` protocol, with reconnect
+   and resubscribe; port it.
 5. **Document all four transports** side by side with their trade-offs: HTTP (no
    subscriptions), SSE (server→client only, ~6 connections per origin, no custom headers),
    WebSocket (bidirectional, reconnect complexity), Tauri IPC. Users currently have no way to

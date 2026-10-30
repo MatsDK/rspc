@@ -18,6 +18,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 
+# Every procedure over one WebSocket at `/ws`, alongside HTTP and SSE.
+ws = ["axum/ws", "tokio/time"]
+
 # v1 JSON-RPC + WebSocket transport, for clients that have not migrated yet.
 legacy = ["axum/ws"]
 
